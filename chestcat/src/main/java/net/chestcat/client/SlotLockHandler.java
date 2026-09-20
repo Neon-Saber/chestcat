@@ -18,16 +18,16 @@ import java.util.Set;
 /**
  * Favorites/locks a slot belonging to the player's own Inventory container
  * on any screen showing those slots. Toggle via middle-click on the slot,
- * or left-click the gold-block badge in its top-left corner. The badge
- * only appears - and can only be clicked - when the slot has an item.
+ * or left-click the star badge in its top-left corner. Badge only appears
+ * - and can only be clicked - when the slot has an item.
  */
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
 public class SlotLockHandler {
 
     public static final Set<Integer> lockedMirror = new HashSet<>();
-    private static final int BADGE_SIZE = 5;
-    private static final ResourceLocation GOLD_BLOCK_TEXTURE =
-            ResourceLocation.withDefaultNamespace("textures/block/gold_block.png");
+    private static final int BADGE_SIZE = 6;
+    private static final ResourceLocation STAR_TEXTURE =
+            ResourceLocation.fromNamespaceAndPath("chestcat", "textures/gui/favorite_star.png");
 
     @SubscribeEvent
     public static void onMousePressed(ScreenEvent.MouseButtonPressed.Pre event) {
@@ -68,10 +68,10 @@ public class SlotLockHandler {
                 graphics.fill(x, y, x + 16, y + 16, 0x40FFD700);
             }
 
-            graphics.fill(x - 1, y - 1, x + BADGE_SIZE + 1, y + BADGE_SIZE + 1, 0xFF1A1A1A);
-            graphics.blit(GOLD_BLOCK_TEXTURE, x, y, 0, 0, BADGE_SIZE, BADGE_SIZE, 16, 16);
+            graphics.blit(STAR_TEXTURE, x, y, BADGE_SIZE, BADGE_SIZE, 0f, 0f, 16, 16, 16, 16);
             if (!locked) {
-                graphics.fill(x, y, x + BADGE_SIZE, y + BADGE_SIZE, 0xA0000000);
+                // dim the icon when not favorited so it reads as "click to favorite"
+                graphics.fill(x, y, x + BADGE_SIZE, y + BADGE_SIZE, 0x90000000);
             }
         }
     }
@@ -80,7 +80,7 @@ public class SlotLockHandler {
         if (!slot.hasItem()) return false;
         int x = screen.getGuiLeft() + slot.x;
         int y = screen.getGuiTop() + slot.y;
-        return mouseX >= x - 1 && mouseX < x + BADGE_SIZE + 1 && mouseY >= y - 1 && mouseY < y + BADGE_SIZE + 1;
+        return mouseX >= x && mouseX < x + BADGE_SIZE && mouseY >= y && mouseY < y + BADGE_SIZE;
     }
 
     private static Slot findHoveredInventorySlot(AbstractContainerScreen<?> screen, double mouseX, double mouseY) {
