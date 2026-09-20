@@ -31,21 +31,17 @@ import java.util.List;
 /**
  * Self-drawn/self-hit-tested button row (bypasses ScreenEvent.Init.Post).
  *
- * Inventory-style row is now anchored INSIDE the panel, top-left corner
- * (guiLeft+8, guiTop+8) - that's empty gray space on both the survival
- * inventory screen and the creative "Inventory" tab, and sits above the
- * crafting grid / player-head icons without overlapping them.
+ * Inventory-style row anchored INSIDE the panel, top-left corner
+ * (guiLeft+8, guiTop+8) - empty gray space on both the survival inventory
+ * screen and the creative "Inventory" tab.
  *
- * "Is this a player-inventory-style screen" now covers two cases:
+ * "Is this a player-inventory-style screen" covers two cases:
  *  1. Survival inventory - menu is InventoryMenu
- *  2. Creative mode's "Inventory" tab specifically - CreativeModeInventoryScreen
- *     doesn't use InventoryMenu at all (it's a different menu type entirely),
- *     which is why it never matched before. Other creative tabs (blocks,
- *     combat, etc.) are intentionally excluded - only the one styled like
- *     the survival inventory gets the row.
+ *  2. Creative mode's "Inventory" tab specifically, via the public
+ *     CreativeModeInventoryScreen.getSelectedTab() accessor (the field
+ *     itself is private).
  *
- * Chest row stays anchored ABOVE the panel as before (unchanged, not part
- * of this request).
+ * Chest row stays anchored ABOVE the panel, unchanged.
  */
 @OnlyIn(Dist.CLIENT)
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
@@ -106,7 +102,7 @@ public class ChestCatScreenButtons {
     private static boolean isPlayerInventoryStyleScreen(AbstractContainerScreen<?> screen) {
         if (screen.getMenu() instanceof InventoryMenu) return true;
         if (screen instanceof CreativeModeInventoryScreen) {
-            CreativeModeTab tab = CreativeModeInventoryScreen7.selectedTab;
+            CreativeModeTab tab = CreativeModeInventoryScreen.getSelectedTab();
             return tab != null && tab.getType() == CreativeModeTab.Type.INVENTORY;
         }
         return false;
