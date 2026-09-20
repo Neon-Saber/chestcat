@@ -24,8 +24,10 @@ import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * Buttons anchored ABOVE the GUI panel, left-to-right from the panel's
- * left edge - can never overlap a slot regardless of container size.
+ * Buttons anchored above the GUI panel when there's room; clamped to y=0
+ * (top of the window) instead of going negative/off-screen when there
+ * isn't - e.g. high GUI scale or a small window, which is almost certainly
+ * why these were invisible on the E inventory screen before.
  *
  * Inventory screen: S (sort) M (pick mode) C (row/col fill toggle) Q (quick-stack matching items into nearby chests)
  * Chest screen:      S (sort) M (pick mode) G (pull chest -> inventory) P (push inventory -> chest)
@@ -44,8 +46,8 @@ public class ChestCatScreenButtons {
     @SubscribeEvent
     public static void onScreenInit(ScreenEvent.Init.Post event) {
         if (event.getScreen() instanceof InventoryScreen inv) {
-            int x = inv.getGuiLeft();
-            int y = inv.getGuiTop() - SIZE - ROW_MARGIN;
+            int x = Math.max(0, inv.getGuiLeft());
+            int y = Math.max(0, inv.getGuiTop() - SIZE - ROW_MARGIN);
 
             x = addSortButton(event, x, y,
                     () -> ChestCatClient.inventorySortMode,
@@ -68,8 +70,8 @@ public class ChestCatScreenButtons {
 
         } else if (event.getScreen() instanceof AbstractContainerScreen<?> acs
                 && acs.getMenu() instanceof ChestMenu) {
-            int x = acs.getGuiLeft();
-            int y = acs.getGuiTop() - SIZE - ROW_MARGIN;
+            int x = Math.max(0, acs.getGuiLeft());
+            int y = Math.max(0, acs.getGuiTop() - SIZE - ROW_MARGIN);
 
             x = addSortButton(event, x, y,
                     () -> ChestCatClient.chestSortMode,
