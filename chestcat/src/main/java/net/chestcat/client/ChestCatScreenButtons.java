@@ -17,6 +17,7 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.item.CreativeModeTab;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -36,9 +37,9 @@ import java.util.List;
  *
  * "Is this a player-inventory-style screen" covers two cases:
  *  1. Survival inventory - menu is InventoryMenu
- *  2. Creative mode's "Inventory" tab specifically, via the built-in public
- *     instance method isInventoryTabSelected() - no reaching for the
- *     private selectedTab field at all.
+ *  2. Creative mode's "Inventory" tab specifically, via the AT-widened
+ *     `selectedTab` field on CreativeModeInventoryScreen (no public
+ *     accessor exists for this in 1.21.1 - see accesstransformer.cfg).
  *
  * Chest row stays anchored ABOVE the panel, unchanged.
  */
@@ -100,8 +101,9 @@ public class ChestCatScreenButtons {
 
     private static boolean isPlayerInventoryStyleScreen(AbstractContainerScreen<?> screen) {
         if (screen.getMenu() instanceof InventoryMenu) return true;
-        if (screen instanceof CreativeModeInventoryScreen creative) {
-            return creative.isInventoryTabSelected();
+        if (screen instanceof CreativeModeInventoryScreen cmis) {
+            CreativeModeTab tab = cmis.selectedTab;
+            return tab != null && tab.getType() == CreativeModeTab.Type.INVENTORY;
         }
         return false;
     }
