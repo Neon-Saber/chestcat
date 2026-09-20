@@ -6,6 +6,7 @@ import net.minecraft.tags.ItemTags;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
@@ -34,6 +35,29 @@ public final class ItemSortUtils {
         };
     }
 
+    /** Reorders a sorted list so filling slots left-to-right, top-to-bottom
+     * produces a column-major visual layout instead of row-major. No-op
+     * (returns the same list) when columnMajor is false. */
+    public static List<ItemStack> toFillOrder(List<ItemStack> sorted, int rows, int cols, boolean columnMajor) {
+        if (!columnMajor) return sorted;
+
+        List<ItemStack> result = new ArrayList<>(java.util.Collections.nCopies(sorted.size(), null));
+        int idx = 0;
+        for (int col = 0; col < cols && idx < sorted.size(); col++) {
+            for (int row = 0; row < rows && idx < sorted.size(); row++) {
+                int rowMajorPos = row * cols + col;
+                if (rowMajorPos < result.size()) {
+                    result.set(rowMajorPos, sorted.get(idx++));
+                }
+            }
+        }
+        List<ItemStack> trimmed = new ArrayList<>();
+        for (ItemStack s : result) {
+            if (s != null) trimmed.add(s);
+        }
+        return trimmed;
+    }
+
     private static Comparator<ItemStack> byName() {
         return Comparator.comparing(s -> s.getHoverName().getString());
     }
@@ -46,7 +70,6 @@ public final class ItemSortUtils {
         return BuiltInRegistries.ITEM.getId(stack.getItem());
     }
 
-    /** Weapons > tools > armor > food > blocks > everything else. */
     private static int typeRank(ItemStack stack) {
         if (stack.is(ItemTags.SWORDS) || stack.is(ItemTags.AXES)) return 0;
         if (stack.is(ItemTags.PICKAXES) || stack.is(ItemTags.SHOVELS) || stack.is(ItemTags.HOES)) return 1;
@@ -57,7 +80,6 @@ public final class ItemSortUtils {
         return 5;
     }
 
-    /** Pulls a color name out of the item's registry path (e.g. red_wool -> red), rainbow ordered. */
     private static int colorRank(ItemStack stack) {
         String path = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
         for (int i = 0; i < COLOR_ORDER.size(); i++) {

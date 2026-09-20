@@ -12,22 +12,34 @@ public final class InventorySorter {
 
     private InventorySorter() {}
 
-    private static final int MAIN_START = 0;
-    private static final int MAIN_END = 36;
-    private static final int ROWS = 4;
     private static final int COLS = 9;
+    private static final int MAIN_ROWS = 3;        // inventory slots 9..35, drawn top to bottom
+    private static final int MAIN_FIRST_SLOT = 9;  // hotbar is slots 0..8, drawn as the bottom row
 
     public static int sortMainInventory(ServerPlayer player, ItemSortMode mode) {
         Inventory inv = player.getInventory();
         Set<Integer> locked = LockedSlots.get(player.getUUID());
+        SortLayoutPrefs.Settings prefs = SortLayoutPrefs.get(player.getUUID());
+
+        // Visual grid, top row first: 3 main rows, then the hotbar row if it's included.
+        int rows = prefs.includeHotbar() ? MAIN_ROWS + 1 : MAIN_ROWS;
+        int[][] grid = new int[rows][COLS];
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < COLS; c++) {
+                int slot = r < MAIN_ROWS ? MAIN_FIRST_SLOT + r * COLS + c : c;
+                grid[r][c] = locked.contains(slot) ? -1 : slot;
+            }
+        }
 
         List<ItemStack> stacks = new ArrayList<>();
-        for (int i = MAIN_START; i < MAIN_END; i++) {
-            if (locked.contains(i)) continue;
-            ItemStack stack = inv.getItem(i);
-            if (!stack.isEmpty()) {
-                stacks.add(stack.copy());
-                inv.setItem(i, ItemStack.EMPTY);
+        for (int[] row : grid) {
+            for (int slot : row) {
+                if (slot < 0) continue;
+                ItemStack stack = inv.getItem(slot);
+                if (!stack.isEmpty()) {
+                    stacks.add(stack.copy());
+                    inv.setItem(slot, ItemStack.EMPTY);
+                }
             }
         }
 
@@ -49,17 +61,14 @@ public final class InventorySorter {
 
         merged.sort(ItemSortUtils.comparator(mode));
 
-        boolean columnMode = ColumnFillPrefs.isColumnMode(player.getUUID());
-        List<ItemStack> fillOrder = ItemSortUtils.toFillOrder(merged, ROWS, COLS, columnMode);
-
-        int slot = MAIN_START;
-        for (ItemStack stack : fillOrder) {
-            while (slot < MAIN_END && locked.contains(slot)) slot++;
-            if (slot >= MAIN_END) {
+        List<Integer> order = SortGrid.fillOrder(grid, prefs.layout(), prefs.reverse());
+        int i = 0;
+        for (ItemStack stack : merged) {
+            if (i >= order.size()) {
                 player.drop(stack, false);
                 continue;
             }
-            inv.setItem(slot++, stack);
+            inv.setItem(order.get(i++), stack);
         }
 
         inv.setChanged();

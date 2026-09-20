@@ -45,6 +45,7 @@ public class ChestCatClient {
         }
 
         while (SORT_INVENTORY_KEY.consumeClick()) {
+            SortSettings.sync();
             PacketDistributor.sendToServer(new SortInventoryPayload(inventorySortMode));
         }
     }

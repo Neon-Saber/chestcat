@@ -65,6 +65,36 @@ public class NetworkHandler {
                 SortOpenContainerPayload.STREAM_CODEC,
                 NetworkHandler::handleSortOpenContainer
         );
+
+        registrar.playToServer(
+                ToggleSlotLockPayload.TYPE,
+                ToggleSlotLockPayload.STREAM_CODEC,
+                NetworkHandler::handleToggleSlotLock
+        );
+
+        registrar.playToServer(
+                QuickStackPayload.TYPE,
+                QuickStackPayload.STREAM_CODEC,
+                NetworkHandler::handleQuickStack
+        );
+
+        registrar.playToServer(
+                SortIntoChestPayload.TYPE,
+                SortIntoChestPayload.STREAM_CODEC,
+                NetworkHandler::handleSortIntoChest
+        );
+
+        registrar.playToServer(
+                SetSortLayoutPayload.TYPE,
+                SetSortLayoutPayload.STREAM_CODEC,
+                NetworkHandler::handleToggleColumnFill
+        );
+
+        registrar.playToServer(
+                DumpChestPayload.TYPE,
+                DumpChestPayload.STREAM_CODEC,
+                NetworkHandler::handleDumpChest
+        );
     }
 
     private static void handleRequestNearby(RequestNearbyChestsPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
@@ -143,8 +173,43 @@ public class NetworkHandler {
             if (!(context.player() instanceof ServerPlayer player)) return;
             if (player.containerMenu instanceof ChestMenu chestMenu) {
                 Container container = chestMenu.getSlot(0).container;
-                ChestSorter.sortContainer(container, payload.sortMode());
+                ChestSorter.sortContainer(container, payload.sortMode(), player.getUUID());
             }
+        });
+    }
+
+    private static void handleToggleSlotLock(ToggleSlotLockPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            net.chestcat.LockedSlots.toggle(player.getUUID(), payload.slotIndex());
+        });
+    }
+
+    private static void handleQuickStack(QuickStackPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            net.chestcat.QuickStack.run(player);
+        });
+    }
+
+    private static void handleSortIntoChest(SortIntoChestPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            net.chestcat.DumpIntoChest.run(player);
+        });
+    }
+
+    private static void handleToggleColumnFill(SetSortLayoutPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            net.chestcat.SortLayoutPrefs.set(player.getUUID(), payload.layout(), payload.reverse(), payload.includeHotbar());
+        });
+    }
+
+    private static void handleDumpChest(DumpChestPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            net.chestcat.DumpChestIntoInventory.run(player);
         });
     }
 }

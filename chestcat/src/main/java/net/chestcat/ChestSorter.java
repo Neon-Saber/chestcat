@@ -19,6 +19,7 @@ public final class ChestSorter {
         ServerLevel level = player.serverLevel();
         BlockPos center = player.blockPosition();
         ChestCategoryData data = ChestCategoryData.get(level);
+        SortLayoutPrefs.Settings layout = SortLayoutPrefs.get(player.getUUID());
 
         List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, center, radius);
         if (storages.isEmpty()) {
@@ -76,32 +77,48 @@ public final class ChestSorter {
 
         for (List<Container> containers : byCategory.values()) {
             for (Container c : containers) {
-                sortContainerContents(c, sortMode);
+                sortContainerContents(c, sortMode, layout);
             }
         }
 
         return new Result(moved, dropped, storages.size());
     }
 
-    /** Sorts a single container's contents in place, without moving items between containers. */
+    /** Sorts one container in place using default layout settings (rows, top-left first). */
     public static void sortContainer(Container container, ItemSortMode mode) {
-        sortContainerContents(container, mode);
+        sortContainerContents(container, mode, SortLayoutPrefs.Settings.DEFAULT);
     }
 
-    private static void sortContainerContents(Container container, ItemSortMode mode) {
+    /** Sorts one container in place using the given player's layout settings. */
+    public static void sortContainer(Container container, ItemSortMode mode, UUID player) {
+        sortContainerContents(container, mode, SortLayoutPrefs.get(player));
+    }
+
+    private static void sortContainerContents(Container container, ItemSortMode mode,
+                                              SortLayoutPrefs.Settings layout) {
+        int size = container.getContainerSize();
+        if (size == 0) return;
+
         List<ItemStack> items = new ArrayList<>();
-        for (int i = 0; i < container.getContainerSize(); i++) {
+        for (int i = 0; i < size; i++) {
             ItemStack s = container.getItem(i);
             if (!s.isEmpty()) items.add(s.copy());
             container.setItem(i, ItemStack.EMPTY);
         }
 
-        Comparator<ItemStack> comparator = ItemSortUtils.comparator(mode);
+        items.sort(ItemSortUtils.comparator(mode));
 
-        items.sort(comparator);
+        // Chest-style containers are 9 wide; anything else is treated as a single row.
+        int cols = (size % 9 == 0) ? 9 : size;
+        int rows = size / cols;
+        int[][] grid = new int[rows][cols];
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) grid[r][c] = r * cols + c;
+        }
 
-        for (int i = 0; i < items.size() && i < container.getContainerSize(); i++) {
-            container.setItem(i, items.get(i));
+        List<Integer> order = SortGrid.fillOrder(grid, layout.layout(), layout.reverse());
+        for (int i = 0; i < items.size() && i < order.size(); i++) {
+            container.setItem(order.get(i), items.get(i));
         }
     }
 
