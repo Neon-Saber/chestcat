@@ -26,15 +26,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Self-drawn/self-hit-tested button row - deliberately does NOT use
- * ScreenEvent.Init.Post + addListener(). That event only fires from inside
- * Screen.init(); if the screen that actually renders on E doesn't call
- * super.init() (e.g. it's wrapped/replaced by something else in the
- * modpack), the event silently never fires and nothing added that way ever
- * shows up - which matches exactly what's been happening. Render.Post and
- * MouseButtonPressed.Pre don't have that dependency (SlotLockHandler proves
- * they fire fine on this same screen), so drawing and hit-testing
- * ourselves sidesteps the problem entirely regardless of what wraps it.
+ * Self-drawn/self-hit-tested button row (see class-level note history: this
+ * bypasses ScreenEvent.Init.Post on purpose since that never fires for
+ * whatever screen renders on E).
+ *
+ * Flat, rounded-corner, dark buttons with a thin accent border that
+ * brightens on hover - no more chunky 2000s-bevel look. Tooltip is anchored
+ * BELOW the entire button row (not at the cursor), so it can never overlap
+ * the button you're hovering.
  *
  * Inventory screen (menu is InventoryMenu): S (sort) M (pick mode) C (row/col fill toggle) Q (quick-stack into nearby chests)
  * Chest screen (menu is ChestMenu):          S (sort) M (pick mode) G (pull chest -> inventory) P (push inventory -> chest)
@@ -43,8 +42,8 @@ import java.util.List;
 public class ChestCatScreenButtons {
 
     private static final int SIZE = 14;
-    private static final int GAP = 2;
-    private static final int ROW_MARGIN = 2;
+    private static final int GAP = 3;
+    private static final int ROW_MARGIN = 3;
 
     private record VButton(int x, int y, String label, String tooltip,
                             Runnable onLeft, Runnable onRight, Runnable onShiftLeft) {}
@@ -63,13 +62,14 @@ public class ChestCatScreenButtons {
         double my = mc.mouseHandler.ypos() * mc.getWindow().getGuiScaledHeight() / mc.getWindow().getScreenHeight();
 
         VButton hovered = null;
+        int rowBottom = buttons.get(0).y() + SIZE;
         for (VButton b : buttons) {
             boolean over = mx >= b.x() && mx < b.x() + SIZE && my >= b.y() && my < b.y() + SIZE;
             if (over) hovered = b;
             drawButton(graphics, font, b, over);
         }
         if (hovered != null) {
-            drawTooltip(graphics, font, hovered.tooltip(), (int) mx, (int) my);
+            drawTooltip(graphics, font, hovered.tooltip(), hovered.x(), rowBottom + 4);
         }
     }
 
@@ -101,8 +101,8 @@ public class ChestCatScreenButtons {
             ItemSortMode mode = ChestCatClient.inventorySortMode;
 
             list.add(new VButton(x, y, "S",
-                    "Sort mode: " + mode.getDisplayName()
-                            + "\nLeft: sort | Right: change mode\nShift+Left: sort nearby storage too",
+                    "Sort: " + mode.getDisplayName()
+                            + "  |  Left: sort  |  Right: change mode  |  Shift+Left: sort nearby too",
                     () -> PacketDistributor.sendToServer(new SortInventoryPayload(ChestCatClient.inventorySortMode)),
                     () -> ChestCatClient.inventorySortMode = ChestCatClient.inventorySortMode.next(),
                     () -> PacketDistributor.sendToServer(new SortNearbyPayload(NetworkHandler.DEFAULT_RADIUS, ChestCatClient.inventorySortMode))));
@@ -130,7 +130,7 @@ public class ChestCatScreenButtons {
             ItemSortMode mode = ChestCatClient.chestSortMode;
 
             list.add(new VButton(x, y, "S",
-                    "Sort mode: " + mode.getDisplayName() + "\nLeft: sort | Right: change mode",
+                    "Sort: " + mode.getDisplayName() + "  |  Left: sort  |  Right: change mode",
                     () -> PacketDistributor.sendToServer(new SortOpenContainerPayload(ChestCatClient.chestSortMode)),
                     () -> ChestCatClient.chestSortMode = ChestCatClient.chestSortMode.next(),
                     null));
@@ -157,25 +157,29 @@ public class ChestCatScreenButtons {
 
     private static void drawButton(GuiGraphics graphics, Font font, VButton b, boolean hovered) {
         int x = b.x(), y = b.y();
-        int body = hovered ? 0xFFA0A0A0 : 0xFF8B8B8B;
-        graphics.fill(x - 1, y - 1, x + SIZE + 1, y + SIZE + 1, 0xFF000000);
-        graphics.fill(x, y, x + SIZE, y + SIZE, body);
-        graphics.fill(x, y, x + SIZE, y + 1, 0x60FFFFFF);
-        graphics.fill(x, y, x + 1, y + SIZE, 0x60FFFFFF);
-        graphics.fill(x, y + SIZE - 1, x + SIZE, y + SIZE, 0x60000000);
-        graphics.fill(x + SIZE - 1, y, x + SIZE, y + SIZE, 0x60000000);
-        graphics.drawCenteredString(font, b.label(), x + SIZE / 2, y + (SIZE - 8) / 2, 0xFFFFFFFF);
+        int bg = hovered ? 0xF03A3F4B : 0xE0242730;
+        int accent = hovered ? 0xFF6FB4FF : 0xFF4A4E58;
+
+        fillRounded(graphics, x, y + 1, SIZE, SIZE, 0x40000000); // soft drop shadow
+        fillRounded(graphics, x, y, SIZE, SIZE, bg);
+
+        graphics.fill(x + 1, y, x + SIZE - 1, y + 1, accent);
+        graphics.fill(x + 1, y + SIZE - 1, x + SIZE - 1, y + SIZE, accent);
+        graphics.fill(x, y + 1, x + 1, y + SIZE - 1, accent);
+        graphics.fill(x + SIZE - 1, y + 1, x + SIZE, y + SIZE - 1, accent);
+
+        graphics.drawCenteredString(font, b.label(), x + SIZE / 2, y + (SIZE - 8) / 2, 0xFFEDEDED);
     }
 
-    private static void drawTooltip(GuiGraphics graphics, Font font, String tooltip, int mx, int my) {
-        String[] lines = tooltip.split("\n");
-        int w = 0;
-        for (String l : lines) w = Math.max(w, font.width(l));
-        int tx = mx + 10;
-        int ty = my - 6;
-        graphics.fill(tx - 3, ty - 3, tx + w + 3, ty + lines.length * 10 + 1, 0xF0100010);
-        for (int i = 0; i < lines.length; i++) {
-            graphics.drawString(font, lines[i], tx, ty + i * 10, 0xFFFFFFFF);
-        }
+    private static void fillRounded(GuiGraphics graphics, int x, int y, int w, int h, int color) {
+        graphics.fill(x + 1, y, x + w - 1, y + h, color);
+        graphics.fill(x, y + 1, x + w, y + h - 1, color);
+    }
+
+    private static void drawTooltip(GuiGraphics graphics, Font font, String tooltip, int x, int y) {
+        int w = font.width(tooltip);
+        graphics.fill(x - 3, y - 2, x + w + 3, y + 11, 0xF0181A20);
+        graphics.fill(x - 3, y - 2, x + w + 3, y - 1, 0xFF3A3F4B);
+        graphics.drawString(font, tooltip, x, y, 0xFFEDEDED);
     }
 }
