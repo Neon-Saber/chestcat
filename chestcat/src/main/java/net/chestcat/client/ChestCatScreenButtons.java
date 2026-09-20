@@ -17,6 +17,7 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ScreenEvent;
@@ -26,18 +27,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Self-drawn/self-hit-tested button row (see class-level note history: this
- * bypasses ScreenEvent.Init.Post on purpose since that never fires for
- * whatever screen renders on E).
+ * Self-drawn/self-hit-tested button row (bypasses ScreenEvent.Init.Post -
+ * see prior commit message history for why).
  *
- * Flat, rounded-corner, dark buttons with a thin accent border that
- * brightens on hover - no more chunky 2000s-bevel look. Tooltip is anchored
- * BELOW the entire button row (not at the cursor), so it can never overlap
- * the button you're hovering.
+ * @OnlyIn(Dist.CLIENT) since this is pure GUI rendering/input code - must
+ * never load on a dedicated server's classpath.
  *
  * Inventory screen (menu is InventoryMenu): S (sort) M (pick mode) C (row/col fill toggle) Q (quick-stack into nearby chests)
  * Chest screen (menu is ChestMenu):          S (sort) M (pick mode) G (pull chest -> inventory) P (push inventory -> chest)
  */
+@OnlyIn(Dist.CLIENT)
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
 public class ChestCatScreenButtons {
 
@@ -160,7 +159,7 @@ public class ChestCatScreenButtons {
         int bg = hovered ? 0xF03A3F4B : 0xE0242730;
         int accent = hovered ? 0xFF6FB4FF : 0xFF4A4E58;
 
-        fillRounded(graphics, x, y + 1, SIZE, SIZE, 0x40000000); // soft drop shadow
+        fillRounded(graphics, x, y + 1, SIZE, SIZE, 0x40000000);
         fillRounded(graphics, x, y, SIZE, SIZE, bg);
 
         graphics.fill(x + 1, y, x + SIZE - 1, y + 1, accent);

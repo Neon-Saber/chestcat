@@ -6,6 +6,7 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ScreenEvent;
@@ -18,9 +19,11 @@ import java.util.Set;
  * Favorites/locks a slot belonging to the player's own Inventory container.
  * Toggle via middle-click, or left-click the small dot badge in the slot's
  * top-left corner (only present/clickable when the slot has an item).
- * Drawn procedurally (no texture) - a tiny raster icon just blurs at this
- * size, a flat pixel dot doesn't.
+ * @OnlyIn(Dist.CLIENT) since this renders GUI and touches client-only
+ * classes (GuiGraphics, AbstractContainerScreen) - must never load on a
+ * dedicated server's classpath.
  */
+@OnlyIn(Dist.CLIENT)
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
 public class SlotLockHandler {
 
@@ -69,9 +72,6 @@ public class SlotLockHandler {
         }
     }
 
-    /** 4x4 dot with corner pixels skipped for a rounded look. Solid gold
-     * when favorited, a faint hollow outline otherwise so it stays
-     * unobtrusive until you look for it. */
     private static void drawDot(GuiGraphics graphics, int x, int y, boolean locked) {
         if (locked) {
             graphics.fill(x, y, x + BADGE_SIZE, y + BADGE_SIZE, 0xFF6B4E00);
