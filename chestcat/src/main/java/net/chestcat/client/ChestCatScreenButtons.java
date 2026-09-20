@@ -31,9 +31,11 @@ import java.util.List;
 /**
  * Self-drawn/self-hit-tested button row (bypasses ScreenEvent.Init.Post).
  *
- * Inventory-style row anchored INSIDE the panel, top-left corner
- * (guiLeft+8, guiTop+8) - empty gray space on both the survival inventory
- * screen and the creative "Inventory" tab.
+ * Inventory-style row anchored INSIDE the panel, top-RIGHT corner
+ * (guiLeft + getXSize() - INNER_MARGIN - rowWidth, guiTop + INNER_MARGIN) -
+ * empty gray space on both the survival inventory screen and the creative
+ * "Inventory" tab. getXSize()/getGuiLeft()/getGuiTop() are public NeoForge
+ * patches on AbstractContainerScreen - no AT needed for these.
  *
  * "Is this a player-inventory-style screen" covers two cases:
  *  1. Survival inventory - menu is InventoryMenu
@@ -112,7 +114,9 @@ public class ChestCatScreenButtons {
         List<VButton> list = new ArrayList<>();
 
         if (isPlayerInventoryStyleScreen(screen)) {
-            int x = screen.getGuiLeft() + INNER_MARGIN;
+            // 4 buttons in this row: S, M, C, Q
+            int rowWidth = 4 * SIZE + 3 * GAP;
+            int x = screen.getGuiLeft() + screen.getXSize() - INNER_MARGIN - rowWidth;
             int y = screen.getGuiTop() + INNER_MARGIN;
             ItemSortMode mode = ChestCatClient.inventorySortMode;
 
