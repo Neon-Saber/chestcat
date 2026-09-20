@@ -106,7 +106,7 @@ public class ChestCatScreenButtons {
     private static boolean isPlayerInventoryStyleScreen(AbstractContainerScreen<?> screen) {
         if (screen.getMenu() instanceof InventoryMenu) return true;
         if (screen instanceof CreativeModeInventoryScreen) {
-            CreativeModeTab tab = CreativeModeInventoryScreen.selectedTab;
+            CreativeModeTab tab = CreativeModeInventoryScreen7.selectedTab;
             return tab != null && tab.getType() == CreativeModeTab.Type.INVENTORY;
         }
         return false;
