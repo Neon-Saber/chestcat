@@ -5,22 +5,25 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 
 public final class InventorySorter {
 
     private InventorySorter() {}
 
-    /** Main storage grid only: slots 9..35. Hotbar (0-8), offhand and armor are left untouched. */
-    private static final int MAIN_START = 9;
-    private static final int MAIN_END = 36; // exclusive
+    private static final int MAIN_START = 0;
+    private static final int MAIN_END = 36;
+    private static final int ROWS = 4;
+    private static final int COLS = 9;
 
     public static int sortMainInventory(ServerPlayer player, ItemSortMode mode) {
         Inventory inv = player.getInventory();
+        Set<Integer> locked = LockedSlots.get(player.getUUID());
 
         List<ItemStack> stacks = new ArrayList<>();
         for (int i = MAIN_START; i < MAIN_END; i++) {
+            if (locked.contains(i)) continue;
             ItemStack stack = inv.getItem(i);
             if (!stack.isEmpty()) {
                 stacks.add(stack.copy());
@@ -28,7 +31,6 @@ public final class InventorySorter {
             }
         }
 
-        // Merge identical stacks first.
         List<ItemStack> merged = new ArrayList<>();
         outer:
         for (ItemStack stack : stacks) {
@@ -45,15 +47,15 @@ public final class InventorySorter {
             merged.add(stack);
         }
 
-        Comparator<ItemStack> comparator = ItemSortUtils.comparator(mode);
+        merged.sort(ItemSortUtils.comparator(mode));
 
-        merged.sort(comparator);
+        boolean columnMode = ColumnFillPrefs.isColumnMode(player.getUUID());
+        List<ItemStack> fillOrder = ItemSortUtils.toFillOrder(merged, ROWS, COLS, columnMode);
 
         int slot = MAIN_START;
-        for (ItemStack stack : merged) {
+        for (ItemStack stack : fillOrder) {
+            while (slot < MAIN_END && locked.contains(slot)) slot++;
             if (slot >= MAIN_END) {
-                // Ran out of room (shouldn't normally happen since we started with
-                // this many items), drop any remainder at the player's feet.
                 player.drop(stack, false);
                 continue;
             }
