@@ -1,5 +1,6 @@
 package net.chestcat.client;
 
+import com.mojang.logging.LogUtils;
 import net.chestcat.ItemSortMode;
 import net.chestcat.network.DumpChestPayload;
 import net.chestcat.network.NetworkHandler;
@@ -14,27 +15,40 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
+import org.slf4j.Logger;
 
 /**
- * Buttons anchored above the GUI panel when there's room; clamped to y=0
- * (top of the window) instead of going negative/off-screen when there
- * isn't - e.g. high GUI scale or a small window, which is almost certainly
- * why these were invisible on the E inventory screen before.
+ * Buttons anchored above the GUI panel when there's room, clamped to the
+ * top of the window otherwise.
  *
- * Inventory screen: S (sort) M (pick mode) C (row/col fill toggle) Q (quick-stack matching items into nearby chests)
- * Chest screen:      S (sort) M (pick mode) G (pull chest -> inventory) P (push inventory -> chest)
+ * IMPORTANT: the "is this the player's own inventory" check is now based
+ * on the MENU type (InventoryMenu) rather than the SCREEN class
+ * (InventoryScreen). If some other mod/modpack wraps the E-inventory in a
+ * custom Screen subclass that doesn't extend vanilla InventoryScreen, the
+ * old `instanceof InventoryScreen` check would silently never match and
+ * the buttons would just never appear - which matches exactly what's been
+ * reported. The menu is still InventoryMenu regardless of the screen
+ * class, so checking that is the robust way to detect it.
+ *
+ * Also logs every opened container screen's real class + menu class once,
+ * at INFO level, so if this still doesn't work we have concrete proof of
+ * what's actually rendering instead of guessing again.
+ *
+ * Inventory screen (menu is InventoryMenu): S (sort) M (pick mode) C (row/col fill toggle) Q (quick-stack into nearby chests)
+ * Chest screen (menu is ChestMenu):          S (sort) M (pick mode) G (pull chest -> inventory) P (push inventory -> chest)
  */
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
 public class ChestCatScreenButtons {
 
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final int SIZE = 14;
     private static final int GAP = 2;
     private static final int ROW_MARGIN = 2;
@@ -45,9 +59,14 @@ public class ChestCatScreenButtons {
 
     @SubscribeEvent
     public static void onScreenInit(ScreenEvent.Init.Post event) {
-        if (event.getScreen() instanceof InventoryScreen inv) {
-            int x = Math.max(0, inv.getGuiLeft());
-            int y = Math.max(0, inv.getGuiTop() - SIZE - ROW_MARGIN);
+        if (!(event.getScreen() instanceof AbstractContainerScreen<?> acs)) return;
+
+        LOGGER.info("[ChestCat] Screen opened: {} | Menu: {}",
+                acs.getClass().getName(), acs.getMenu().getClass().getName());
+
+        if (acs.getMenu() instanceof InventoryMenu) {
+            int x = Math.max(0, acs.getGuiLeft());
+            int y = Math.max(0, acs.getGuiTop() - SIZE - ROW_MARGIN);
 
             x = addSortButton(event, x, y,
                     () -> ChestCatClient.inventorySortMode,
@@ -56,7 +75,7 @@ public class ChestCatScreenButtons {
                     mode -> PacketDistributor.sendToServer(new SortNearbyPayload(NetworkHandler.DEFAULT_RADIUS, mode)));
 
             x = addSimpleButton(event, x, y, "M", "Pick sort mode from a list",
-                    () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(inv,
+                    () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(acs,
                             mode -> {
                                 ChestCatClient.inventorySortMode = mode;
                                 PacketDistributor.sendToServer(new SortInventoryPayload(mode));
@@ -68,8 +87,7 @@ public class ChestCatScreenButtons {
             addSimpleButton(event, x, y, "Q", "Quick-stack matching items into nearby chests",
                     () -> PacketDistributor.sendToServer(new QuickStackPayload()));
 
-        } else if (event.getScreen() instanceof AbstractContainerScreen<?> acs
-                && acs.getMenu() instanceof ChestMenu) {
+        } else if (acs.getMenu() instanceof ChestMenu) {
             int x = Math.max(0, acs.getGuiLeft());
             int y = Math.max(0, acs.getGuiTop() - SIZE - ROW_MARGIN);
 

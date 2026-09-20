@@ -17,17 +17,15 @@ import java.util.Set;
 
 /**
  * Favorites/locks a slot belonging to the player's own Inventory container
- * (hotbar, main, armor, offhand) on any screen showing those slots. Toggle
- * via middle-click on the slot, or left-click the gold-block badge in its
- * top-left corner. The badge only appears - and can only be clicked - when
- * the slot actually has an item in it. Locked slots are skipped by sorting,
- * quick-stack, and dump/pull.
+ * on any screen showing those slots. Toggle via middle-click on the slot,
+ * or left-click the gold-block badge in its top-left corner. The badge
+ * only appears - and can only be clicked - when the slot has an item.
  */
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
 public class SlotLockHandler {
 
     public static final Set<Integer> lockedMirror = new HashSet<>();
-    private static final int BADGE_SIZE = 8;
+    private static final int BADGE_SIZE = 5;
     private static final ResourceLocation GOLD_BLOCK_TEXTURE =
             ResourceLocation.withDefaultNamespace("textures/block/gold_block.png");
 
@@ -60,7 +58,7 @@ public class SlotLockHandler {
 
         for (Slot slot : screen.getMenu().slots) {
             if (!(slot.container instanceof Inventory)) continue;
-            if (!slot.hasItem()) continue; // nothing to favorite in an empty slot
+            if (!slot.hasItem()) continue;
 
             int x = screen.getGuiLeft() + slot.x;
             int y = screen.getGuiTop() + slot.y;
@@ -70,9 +68,6 @@ public class SlotLockHandler {
                 graphics.fill(x, y, x + 16, y + 16, 0x40FFD700);
             }
 
-            // Polished little button: dark frame, gold-block texture inside,
-            // dimmed with a translucent overlay when not currently favorited
-            // (so it still reads as "clickable" without looking active).
             graphics.fill(x - 1, y - 1, x + BADGE_SIZE + 1, y + BADGE_SIZE + 1, 0xFF1A1A1A);
             graphics.blit(GOLD_BLOCK_TEXTURE, x, y, 0, 0, BADGE_SIZE, BADGE_SIZE, 16, 16);
             if (!locked) {
