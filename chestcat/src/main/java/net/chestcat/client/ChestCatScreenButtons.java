@@ -14,8 +14,10 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.item.CreativeModeTab;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -27,14 +29,23 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Self-drawn/self-hit-tested button row (bypasses ScreenEvent.Init.Post -
- * see prior commit message history for why).
+ * Self-drawn/self-hit-tested button row (bypasses ScreenEvent.Init.Post).
  *
- * @OnlyIn(Dist.CLIENT) since this is pure GUI rendering/input code - must
- * never load on a dedicated server's classpath.
+ * Inventory-style row is now anchored INSIDE the panel, top-left corner
+ * (guiLeft+8, guiTop+8) - that's empty gray space on both the survival
+ * inventory screen and the creative "Inventory" tab, and sits above the
+ * crafting grid / player-head icons without overlapping them.
  *
- * Inventory screen (menu is InventoryMenu): S (sort) M (pick mode) C (row/col fill toggle) Q (quick-stack into nearby chests)
- * Chest screen (menu is ChestMenu):          S (sort) M (pick mode) G (pull chest -> inventory) P (push inventory -> chest)
+ * "Is this a player-inventory-style screen" now covers two cases:
+ *  1. Survival inventory - menu is InventoryMenu
+ *  2. Creative mode's "Inventory" tab specifically - CreativeModeInventoryScreen
+ *     doesn't use InventoryMenu at all (it's a different menu type entirely),
+ *     which is why it never matched before. Other creative tabs (blocks,
+ *     combat, etc.) are intentionally excluded - only the one styled like
+ *     the survival inventory gets the row.
+ *
+ * Chest row stays anchored ABOVE the panel as before (unchanged, not part
+ * of this request).
  */
 @OnlyIn(Dist.CLIENT)
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
@@ -43,6 +54,7 @@ public class ChestCatScreenButtons {
     private static final int SIZE = 14;
     private static final int GAP = 3;
     private static final int ROW_MARGIN = 3;
+    private static final int INNER_MARGIN = 8;
 
     private record VButton(int x, int y, String label, String tooltip,
                             Runnable onLeft, Runnable onRight, Runnable onShiftLeft) {}
@@ -91,12 +103,21 @@ public class ChestCatScreenButtons {
         }
     }
 
+    private static boolean isPlayerInventoryStyleScreen(AbstractContainerScreen<?> screen) {
+        if (screen.getMenu() instanceof InventoryMenu) return true;
+        if (screen instanceof CreativeModeInventoryScreen) {
+            CreativeModeTab tab = CreativeModeInventoryScreen.selectedTab;
+            return tab != null && tab.getType() == CreativeModeTab.Type.INVENTORY;
+        }
+        return false;
+    }
+
     private static List<VButton> buildButtons(AbstractContainerScreen<?> screen) {
         List<VButton> list = new ArrayList<>();
 
-        if (screen.getMenu() instanceof InventoryMenu) {
-            int x = Math.max(0, screen.getGuiLeft());
-            int y = Math.max(0, screen.getGuiTop() - SIZE - ROW_MARGIN);
+        if (isPlayerInventoryStyleScreen(screen)) {
+            int x = screen.getGuiLeft() + INNER_MARGIN;
+            int y = screen.getGuiTop() + INNER_MARGIN;
             ItemSortMode mode = ChestCatClient.inventorySortMode;
 
             list.add(new VButton(x, y, "S",
