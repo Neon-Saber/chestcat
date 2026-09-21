@@ -71,7 +71,9 @@ public class ChestCatScreenButtons {
         }
 
         if (hovered != null) {
-            drawTooltip(graphics, font, hovered.tooltip(), hovered.x(), hovered.y() + SIZE + 4);
+            int top = Integer.MAX_VALUE, bottom = 0;
+            for (VButton b : buttons) { top = Math.min(top, b.y()); bottom = Math.max(bottom, b.y() + SIZE); }
+            drawTooltip(graphics, font, hovered.tooltip(), hovered.x(), top, bottom);
         }
     }
 
@@ -207,22 +209,38 @@ public class ChestCatScreenButtons {
         graphics.fill(x, y + 1, x + w, y + h - 1, color);
     }
 
-    private static void drawTooltip(GuiGraphics graphics, Font font, String tooltip, int x, int y) {
+    private static void drawTooltip(GuiGraphics graphics, Font font, String tooltip,
+                                    int x, int blockTop, int blockBottom) {
         Minecraft mc = Minecraft.getInstance();
         int screenW = mc.getWindow().getGuiScaledWidth();
         int screenH = mc.getWindow().getGuiScaledHeight();
-        int w = font.width(tooltip);
 
-        int tx = Math.min(x, screenW - w - 6);
-        tx = Math.max(tx, 2);
+        int maxW = Math.max(60, Math.min(170, screenW / 2));
+        java.util.List<net.minecraft.util.FormattedCharSequence> lines =
+                font.split(net.minecraft.network.chat.Component.literal(tooltip), maxW);
+        if (lines.isEmpty()) return;
 
-        int ty = y;
-        if (ty + 11 > screenH) {
-            ty = y - SIZE - 4 - 11;
+        int w = 0;
+        for (net.minecraft.util.FormattedCharSequence line : lines) w = Math.max(w, font.width(line));
+        int h = lines.size() * 10;
+
+        // Sit below the whole button block so it never covers a neighbouring button.
+        int tx = Math.max(2, Math.min(x, screenW - w - 6));
+        int ty = blockBottom + 5;
+        if (ty + h + 1 > screenH) {
+            ty = blockTop - 5 - h; // no room below: go above the block instead
         }
+        if (ty < 2) ty = 2;
 
-        graphics.fill(tx - 3, ty - 2, tx + w + 3, ty + 11, 0xF0181A20);
+        graphics.pose().pushPose();
+        graphics.pose().translate(0.0F, 0.0F, 400.0F); // draw on top of the buttons, like vanilla tooltips
+        graphics.fill(tx - 3, ty - 2, tx + w + 3, ty + h + 1, 0xF0181A20);
         graphics.fill(tx - 3, ty - 2, tx + w + 3, ty - 1, 0xFF3A3F4B);
-        graphics.drawString(font, tooltip, tx, ty, 0xFFEDEDED);
+        int ly = ty;
+        for (net.minecraft.util.FormattedCharSequence line : lines) {
+            graphics.drawString(font, line, tx, ly, 0xFFEDEDED);
+            ly += 10;
+        }
+        graphics.pose().popPose();
     }
 }
