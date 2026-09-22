@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.inventory.ChestMenu;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -30,71 +31,18 @@ public class NetworkHandler {
     public static void register(RegisterPayloadHandlersEvent event) {
         PayloadRegistrar registrar = event.registrar("1");
 
-        registrar.playToServer(
-                RequestNearbyChestsPayload.TYPE,
-                RequestNearbyChestsPayload.STREAM_CODEC,
-                NetworkHandler::handleRequestNearby
-        );
-
-        registrar.playToClient(
-                NearbyChestsResponsePayload.TYPE,
-                NearbyChestsResponsePayload.STREAM_CODEC,
-                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleNearbyResponse(payload)
-        );
-
-        registrar.playToServer(
-                AssignCategoryPayload.TYPE,
-                AssignCategoryPayload.STREAM_CODEC,
-                NetworkHandler::handleAssignCategory
-        );
-
-        registrar.playToServer(
-                SortNearbyPayload.TYPE,
-                SortNearbyPayload.STREAM_CODEC,
-                NetworkHandler::handleSortNearby
-        );
-
-        registrar.playToServer(
-                SortInventoryPayload.TYPE,
-                SortInventoryPayload.STREAM_CODEC,
-                NetworkHandler::handleSortInventory
-        );
-
-        registrar.playToServer(
-                SortOpenContainerPayload.TYPE,
-                SortOpenContainerPayload.STREAM_CODEC,
-                NetworkHandler::handleSortOpenContainer
-        );
-
-        registrar.playToServer(
-                ToggleSlotLockPayload.TYPE,
-                ToggleSlotLockPayload.STREAM_CODEC,
-                NetworkHandler::handleToggleSlotLock
-        );
-
-        registrar.playToServer(
-                QuickStackPayload.TYPE,
-                QuickStackPayload.STREAM_CODEC,
-                NetworkHandler::handleQuickStack
-        );
-
-        registrar.playToServer(
-                SortIntoChestPayload.TYPE,
-                SortIntoChestPayload.STREAM_CODEC,
-                NetworkHandler::handleSortIntoChest
-        );
-
-        registrar.playToServer(
-                SetSortLayoutPayload.TYPE,
-                SetSortLayoutPayload.STREAM_CODEC,
-                NetworkHandler::handleToggleColumnFill
-        );
-
-        registrar.playToServer(
-                DumpChestPayload.TYPE,
-                DumpChestPayload.STREAM_CODEC,
-                NetworkHandler::handleDumpChest
-        );
+        registrar.playToServer(RequestNearbyChestsPayload.TYPE, RequestNearbyChestsPayload.STREAM_CODEC, NetworkHandler::handleRequestNearby);
+        registrar.playToClient(NearbyChestsResponsePayload.TYPE, NearbyChestsResponsePayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleNearbyResponse(payload));
+        registrar.playToServer(AssignCategoryPayload.TYPE, AssignCategoryPayload.STREAM_CODEC, NetworkHandler::handleAssignCategory);
+        registrar.playToServer(SortNearbyPayload.TYPE, SortNearbyPayload.STREAM_CODEC, NetworkHandler::handleSortNearby);
+        registrar.playToServer(SortInventoryPayload.TYPE, SortInventoryPayload.STREAM_CODEC, NetworkHandler::handleSortInventory);
+        registrar.playToServer(SortOpenContainerPayload.TYPE, SortOpenContainerPayload.STREAM_CODEC, NetworkHandler::handleSortOpenContainer);
+        registrar.playToServer(ToggleSlotLockPayload.TYPE, ToggleSlotLockPayload.STREAM_CODEC, NetworkHandler::handleToggleSlotLock);
+        registrar.playToServer(QuickStackPayload.TYPE, QuickStackPayload.STREAM_CODEC, NetworkHandler::handleQuickStack);
+        registrar.playToServer(SortIntoChestPayload.TYPE, SortIntoChestPayload.STREAM_CODEC, NetworkHandler::handleSortIntoChest);
+        registrar.playToServer(SetSortLayoutPayload.TYPE, SetSortLayoutPayload.STREAM_CODEC, NetworkHandler::handleToggleColumnFill);
+        registrar.playToServer(DumpChestPayload.TYPE, DumpChestPayload.STREAM_CODEC, NetworkHandler::handleDumpChest);
     }
 
     private static void handleRequestNearby(RequestNearbyChestsPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
@@ -103,18 +51,40 @@ public class NetworkHandler {
             ServerLevel level = player.serverLevel();
             ChestCategoryData data = ChestCategoryData.get(level);
 
-            List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, player.blockPosition(), payload.radius());
             List<NearbyChestsResponsePayload.Entry> entries = new ArrayList<>();
 
+            List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, player.blockPosition(), payload.radius());
             for (ChestUtil.Storage storage : storages) {
-                ItemCategory category = data.getCategory(storage.canonicalPos()).orElse(null);
-                String name = category != null ? category.name() : "UNASSIGNED";
+                ItemCategory assigned = data.getCategory(storage.canonicalPos()).orElse(null);
+                String categoryName = assigned != null ? assigned.name() : "UNASSIGNED";
+                ItemCategory autoCategory = ChestSorter.detectDominantCategory(storage.container());
+
                 int itemCount = 0;
                 for (int i = 0; i < storage.container().getContainerSize(); i++) {
                     itemCount += storage.container().getItem(i).getCount();
                 }
                 int free = ChestUtil.freeCapacityEstimate(storage.container());
-                entries.add(new NearbyChestsResponsePayload.Entry(storage.canonicalPos(), name, itemCount, free));
+
+                String kindTag = switch (storage.kind()) {
+                    case CHEST -> "CHEST";
+                    case BARREL -> "BARREL";
+                    case MODDED -> "MODDED:" + storage.modId();
+                };
+
+                entries.add(new NearbyChestsResponsePayload.Entry(
+                        storage.canonicalPos(), categoryName, autoCategory.name(), itemCount, free, kindTag));
+            }
+
+            for (BlockPos enderPos : ChestUtil.findNearbyEnderChests(level, player.blockPosition(), payload.radius())) {
+                Container enderInv = player.getEnderChestInventory();
+                int itemCount = 0;
+                int free = 0;
+                for (int i = 0; i < enderInv.getContainerSize(); i++) {
+                    ItemStack stack = enderInv.getItem(i);
+                    if (stack.isEmpty()) free++; else itemCount += stack.getCount();
+                }
+                entries.add(new NearbyChestsResponsePayload.Entry(
+                        enderPos, "UNASSIGNED", "MISC", itemCount, free, "ENDER_CHEST"));
             }
 
             context.reply(new NearbyChestsResponsePayload(entries));
@@ -125,23 +95,20 @@ public class NetworkHandler {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
             ServerLevel level = player.serverLevel();
-
             BlockEntity be = level.getBlockEntity(payload.pos());
             if (be == null) return;
 
             ChestCategoryData data = ChestCategoryData.get(level);
             if (payload.categoryName().equals("AUTO")) {
                 data.clearCategory(payload.pos());
-                player.sendSystemMessage(Component.literal("Chest category reset to auto-detect.")
-                        .withStyle(ChatFormatting.GRAY));
+                player.sendSystemMessage(Component.literal("Chest category reset to auto-detect.").withStyle(ChatFormatting.GRAY));
                 return;
             }
 
             try {
                 ItemCategory category = ItemCategory.valueOf(payload.categoryName());
                 data.setCategory(payload.pos(), category);
-                player.sendSystemMessage(Component.literal("Chest set to category: " + category.getDisplayName())
-                        .withStyle(ChatFormatting.GREEN));
+                player.sendSystemMessage(Component.literal("Chest set to category: " + category.getDisplayName()).withStyle(ChatFormatting.GREEN));
             } catch (IllegalArgumentException ignored) {
             }
         });
@@ -163,8 +130,7 @@ public class NetworkHandler {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
             int count = InventorySorter.sortMainInventory(player, payload.sortMode());
-            player.sendSystemMessage(Component.literal("Inventory sorted (" + count + " stacks).")
-                    .withStyle(ChatFormatting.GREEN));
+            player.sendSystemMessage(Component.literal("Inventory sorted (" + count + " stacks).").withStyle(ChatFormatting.GREEN));
         });
     }
 

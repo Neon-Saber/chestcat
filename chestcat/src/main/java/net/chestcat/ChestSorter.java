@@ -29,11 +29,16 @@ public final class ChestSorter {
         Map<ChestUtil.Storage, ItemCategory> storageCategory = new LinkedHashMap<>();
         for (ChestUtil.Storage storage : storages) {
             Optional<ItemCategory> assigned = data.getCategory(storage.canonicalPos());
-            ItemCategory category = assigned.orElseGet(() -> autoDetect(storage.container()));
+            ItemCategory category = assigned.orElseGet(() -> detectDominantCategory(storage.container()));
             storageCategory.put(storage, category);
             if (assigned.isEmpty()) {
                 data.setCategory(storage.canonicalPos(), category);
             }
+        }
+
+        List<Container> allContainersInOrder = new ArrayList<>();
+        for (ChestUtil.Storage storage : storages) {
+            allContainersInOrder.add(storage.container());
         }
 
         List<ItemStack> pool = new ArrayList<>();
@@ -52,17 +57,16 @@ public final class ChestSorter {
 
         for (ItemStack stack : pool) {
             ItemCategory category = ItemCategory.categorize(stack);
-            List<Container> targets = byCategory.get(category);
-            if (targets == null || targets.isEmpty()) {
-                targets = byCategory.get(ItemCategory.MISC);
-            }
+            List<Container> primaryTargets = byCategory.get(category);
+            List<Container> miscTargets = byCategory.get(ItemCategory.MISC);
 
             ItemStack remaining = stack;
-            if (targets != null) {
-                for (Container target : targets) {
-                    if (remaining.isEmpty()) break;
-                    remaining = ChestUtil.insertStack(target, remaining);
-                }
+            remaining = insertInto(remaining, primaryTargets);
+            if (!remaining.isEmpty()) {
+                remaining = insertInto(remaining, miscTargets);
+            }
+            if (!remaining.isEmpty()) {
+                remaining = insertInto(remaining, allContainersInOrder);
             }
 
             int originalCount = stack.getCount();
@@ -75,21 +79,27 @@ public final class ChestSorter {
             }
         }
 
-        for (List<Container> containers : byCategory.values()) {
-            for (Container c : containers) {
-                sortContainerContents(c, sortMode, layout);
-            }
+        for (Container c : allContainersInOrder) {
+            sortContainerContents(c, sortMode, layout);
         }
 
         return new Result(moved, dropped, storages.size());
     }
 
-    /** Sorts one container in place using default layout settings (rows, top-left first). */
+    private static ItemStack insertInto(ItemStack stack, List<Container> targets) {
+        if (targets == null || targets.isEmpty() || stack.isEmpty()) return stack;
+        ItemStack remaining = stack;
+        for (Container target : targets) {
+            if (remaining.isEmpty()) break;
+            remaining = ChestUtil.insertStack(target, remaining);
+        }
+        return remaining;
+    }
+
     public static void sortContainer(Container container, ItemSortMode mode) {
         sortContainerContents(container, mode, SortLayoutPrefs.Settings.DEFAULT);
     }
 
-    /** Sorts one container in place using the given player's layout settings. */
     public static void sortContainer(Container container, ItemSortMode mode, UUID player) {
         sortContainerContents(container, mode, SortLayoutPrefs.get(player));
     }
@@ -108,7 +118,6 @@ public final class ChestSorter {
 
         items.sort(ItemSortUtils.comparator(mode));
 
-        // Chest-style containers are 9 wide; anything else is treated as a single row.
         int cols = (size % 9 == 0) ? 9 : size;
         int rows = size / cols;
         int[][] grid = new int[rows][cols];
@@ -122,7 +131,7 @@ public final class ChestSorter {
         }
     }
 
-    private static ItemCategory autoDetect(Container container) {
+    public static ItemCategory detectDominantCategory(Container container) {
         Map<ItemCategory, Integer> counts = new EnumMap<>(ItemCategory.class);
         for (int i = 0; i < container.getContainerSize(); i++) {
             ItemStack stack = container.getItem(i);

@@ -1,6 +1,7 @@
 package net.chestcat;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
@@ -8,8 +9,8 @@ import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -20,12 +21,19 @@ public final class ChestUtil {
 
     private ChestUtil() {}
 
-    /** A single logical storage container: one chest, one double chest (merged), or one barrel. */
-    public record Storage(BlockPos canonicalPos, Container container) {}
+    public enum Kind { CHEST, BARREL, MODDED }
+
+    /** A single logical storage container: one chest, one double chest (merged), one barrel, or a modded container block. */
+    public record Storage(BlockPos canonicalPos, Container container, Kind kind, String modId) {}
 
     /**
-     * Scans a cube around center for chests and barrels, merging double chests into
-     * one logical Storage so they're treated (and categorized/filled) as a single unit.
+     * Scans a cube around center for chests, barrels, and any other block entity that
+     * exposes a Container (modded storage), merging double chests into one logical
+     * Storage so they're treated (and categorized/filled) as a single unit.
+     *
+     * Ender chests are intentionally excluded here - see findNearbyEnderChests below -
+     * since their contents are per-player, not per-block, so they can't be sorted into
+     * like a normal container.
      */
     public static List<Storage> findNearbyStorages(ServerLevel level, BlockPos center, int radius) {
         List<Storage> result = new ArrayList<>();
@@ -61,13 +69,39 @@ public final class ChestUtil {
                     }
                 }
 
-                result.add(new Storage(canonical, container));
+                result.add(new Storage(canonical, container, Kind.CHEST, "minecraft"));
             } else if (be instanceof BarrelBlockEntity barrel) {
                 visited.add(pos);
-                result.add(new Storage(pos.immutable(), barrel));
+                result.add(new Storage(pos.immutable(), barrel, Kind.BARREL, "minecraft"));
+            } else if (be instanceof EnderChestBlockEntity) {
+                // Handled separately - see findNearbyEnderChests.
+                visited.add(pos);
+            } else if (be instanceof Container container) {
+                // Anything else that exposes a real Container is modded storage
+                // (Iron Chests, Sophisticated Storage, etc.) - group it by the
+                // block's own registry namespace.
+                visited.add(pos);
+                String modId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).getNamespace();
+                result.add(new Storage(pos.immutable(), container, Kind.MODDED, modId));
             }
         }
 
+        return result;
+    }
+
+    /**
+     * Ender chests found nearby - listed for locating/organizing only, never sorted
+     * into, since every ender chest shares one inventory per player.
+     */
+    public static List<BlockPos> findNearbyEnderChests(ServerLevel level, BlockPos center, int radius) {
+        List<BlockPos> result = new ArrayList<>();
+        BlockPos min = center.offset(-radius, -radius, -radius);
+        BlockPos max = center.offset(radius, radius, radius);
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (level.getBlockEntity(pos) instanceof EnderChestBlockEntity) {
+                result.add(pos.immutable());
+            }
+        }
         return result;
     }
 

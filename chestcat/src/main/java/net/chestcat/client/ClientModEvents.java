@@ -12,5 +12,7 @@ public class ClientModEvents {
     public static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(ChestCatClient.OPEN_MENU_KEY);
         event.register(ChestCatClient.SORT_INVENTORY_KEY);
+        event.register(ChestCatClient.ASSIGN_CATEGORY_KEY);
+        event.register(ChestCatClient.ASSIGN_CATEGORY_MODIFIER_KEY);
     }
 }
