@@ -1,5 +1,1 @@
-{
-    "key.categories.chestcat": "ChestCat",
-    "key.chestcat.open_menu": "Open Nearby Chests Menu",
-    "key.chestcat.sort_inventory": "Sort My Inventory"
-}
+{"key.categories.chestcat": "ChestCat","key.chestcat.open_menu": "Open Nearby Chests Menu","key.chestcat.sort_inventory": "Sort My Inventory","key.chestcat.assign_category": "Assign Chest Category"}

@@ -45,12 +45,17 @@ public class SortModePickerScreen extends Screen {
 
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(graphics, mouseX, mouseY, partialTick);
         super.render(graphics, mouseX, mouseY, partialTick);
     }
 
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    @Override
+    public void renderBackground(net.minecraft.client.gui.GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        // ChestCat: always a flat dim overlay, never blurred, regardless of any blur setting/mod.
+        graphics.fill(0, 0, this.width, this.height, 0xC0101010);
     }
 }
