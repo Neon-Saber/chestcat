@@ -21,6 +21,8 @@ public class ChestCatClient {
 
     public static ItemSortMode inventorySortMode = ItemSortMode.CREATIVE_ORDER;
     public static ItemSortMode chestSortMode = ItemSortMode.CREATIVE_ORDER;
+    /** Sort mode used by the "Sort All Nearby" button in the C menu (NearbyChestsScreen). */
+    public static ItemSortMode nearbySortMode = ItemSortMode.ITEM_TYPE;
 
     public static boolean locateActive = false;
     public static BlockPos locateTarget = null;

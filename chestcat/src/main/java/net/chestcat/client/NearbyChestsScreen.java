@@ -4,6 +4,7 @@ import net.chestcat.ItemCategory;
 import net.chestcat.network.NetworkHandler;
 import net.chestcat.network.NearbyChestsResponsePayload;
 import net.chestcat.network.SortNearbyPayload;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.ObjectSelectionList;
@@ -35,18 +36,29 @@ public class NearbyChestsScreen extends Screen {
     @Override
     protected void init() {
         int listTop = 34;
-        int listBottom = this.height - 48;
+        int listBottom = this.height - 54;
         this.list = new ChestList(this.minecraft, this.width, listBottom - listTop, listTop, 26);
         rebuildList();
         this.addWidget(this.list);
 
+        int buttonWidth = 150;
+        int gap = 4;
+        int rowY = this.height - 50;
+        int startX = this.width / 2 - buttonWidth - gap / 2;
+
         this.addRenderableWidget(Button.builder(Component.literal("Sort All Nearby"), b -> {
-                    PacketDistributor.sendToServer(new SortNearbyPayload(NetworkHandler.DEFAULT_RADIUS, net.chestcat.ItemSortMode.REGISTRY_ORDER));
+                    PacketDistributor.sendToServer(new SortNearbyPayload(NetworkHandler.DEFAULT_RADIUS,
+                            ChestCatClient.nearbySortMode));
                     this.onClose();
-                }).bounds(this.width / 2 - 154, this.height - 30, 150, 20).build());
+                }).bounds(startX, rowY, buttonWidth, 20).build());
+
+        this.addRenderableWidget(Button.builder(Component.literal("Change Sort Mode"),
+                        b -> this.minecraft.setScreen(new SortModePickerScreen(this,
+                                picked -> ChestCatClient.nearbySortMode = picked)))
+                .bounds(startX + buttonWidth + gap, rowY, buttonWidth, 20).build());
 
         this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> this.onClose())
-                .bounds(this.width / 2 + 4, this.height - 30, 150, 20).build());
+                .bounds(this.width / 2 - buttonWidth / 2, this.height - 26, buttonWidth, 20).build());
     }
 
     private record Section(String title, List<NearbyChestsResponsePayload.Entry> entries) {}
@@ -123,6 +135,8 @@ public class NearbyChestsScreen extends Screen {
         if (entries.isEmpty()) {
             graphics.drawCenteredString(this.font, "No chests, barrels, or ender chests found nearby.", this.width / 2, 50, 0xAAAAAA);
         }
+        graphics.drawCenteredString(this.font, "Sort mode: " + ChestCatClient.nearbySortMode.getDisplayName(),
+                this.width / 2, this.height - 66, 0xFF9A9A9A);
         super.render(graphics, mouseX, mouseY, partialTick);
     }
 

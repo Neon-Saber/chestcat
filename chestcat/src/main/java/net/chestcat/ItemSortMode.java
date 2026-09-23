@@ -6,8 +6,11 @@ public enum ItemSortMode {
     COUNT_DESC("Quantity (high to low)"),
     COUNT_ASC("Quantity (low to high)"),
     MOD_ID("By Mod"),
-    ITEM_TYPE("By Type"),
+    MOD_THEN_TYPE("By Mod, then Type"),
+    ITEM_TYPE("Clean Sort (Type + Material + Color)"),
+    MATERIAL("By Material Tier"),
     COLOR("By Color"),
+    SMART("Smart Sort (Recommended)"),
     REGISTRY_ORDER("Registry Order");
 
     private final String displayName;
