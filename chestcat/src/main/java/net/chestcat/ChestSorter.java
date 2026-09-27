@@ -108,6 +108,12 @@ public final class ChestSorter {
         // unrelated leftover item must not be able to land in a chest the player explicitly
         // restricted, just because nothing else took it.
         List<Container> openContainersInOrder = new ArrayList<>();
+        // Subset of the above whose chest isn't already dedicated to a specific category
+        // (its detected/assigned key is plain MISC). Preferred over openContainersInOrder for
+        // true last-resort overflow, so a chest you've built up as "the dyes chest" or "the
+        // weapons chest" doesn't silently become the dumping ground for everything unrelated
+        // that had nowhere else to go - a generic/unlabeled chest takes that role instead.
+        List<Container> openMiscContainersInOrder = new ArrayList<>();
         // Chests with a hand-written rule, in storage order, paired with that rule - checked
         // per item before any category-based routing, since an explicit rule is more specific
         // than an automatic category guess.
@@ -120,6 +126,9 @@ public final class ChestSorter {
             rule.ifPresent(r -> containerRule.put(working, r));
             if (!rulesData.isRestricted(storage.canonicalPos())) {
                 openContainersInOrder.add(working);
+                if (storageKey.get(storage).category() == ItemCategory.MISC) {
+                    openMiscContainersInOrder.add(working);
+                }
             }
         }
 
@@ -200,13 +209,28 @@ public final class ChestSorter {
             if (!remaining.isEmpty()) {
                 remaining = insertInto(remaining, byCategory.get(key.category()), posOf, movesOut, label);
             }
+            // Broader parent category next (e.g. Stone/Wood/Redstone/Dyes -> Blocks), for when
+            // this exact category has no dedicated chest but a close relative does. Keeps items
+            // in a sensible home instead of skipping straight to undifferentiated overflow.
+            ItemCategory parentCategory = ItemCategory.broadFallback(key.category());
+            if (!remaining.isEmpty() && parentCategory != null) {
+                remaining = insertInto(remaining, byCategory.get(parentCategory), posOf, movesOut, label);
+            }
             if (!remaining.isEmpty()) {
                 remaining = insertInto(remaining, byCategory.get(ItemCategory.MISC), posOf, movesOut, label);
             }
             if (!remaining.isEmpty()) {
-                // Last resort - deliberately excludes rule chests and locked chests (see
+                // Last resort, part 1: any open chest that isn't already dedicated to some
+                // other specific category - a generic/unlabeled chest absorbs true overflow
+                // before a category-specific chest ever does.
+                remaining = insertInto(remaining, openMiscContainersInOrder, posOf, movesOut, label);
+            }
+            if (!remaining.isEmpty()) {
+                // Last resort, part 2 - deliberately excludes rule chests and locked chests (see
                 // openContainersInOrder above). This is the actual fix for the "Tools-only
-                // chest quietly accepts a diamond because nothing else wanted it" bug.
+                // chest quietly accepts a diamond because nothing else wanted it" bug. Only
+                // reached when there's no generic chest left at all, so it's a true last resort
+                // rather than the first place overflow lands.
                 remaining = insertInto(remaining, openContainersInOrder, posOf, movesOut, label);
             }
 

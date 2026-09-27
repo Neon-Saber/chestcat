@@ -11,7 +11,10 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.ChestType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
@@ -95,14 +98,25 @@ public class ChestCatIndicatorRenderer {
         if (drewAny) buffers.endBatch();
     }
 
-    /** Center point between both halves of a double chest, or the single chest's own center. */
+    /** Center point between both halves of a double chest, or the single chest's own center.
+     *  Uses the chest's actual TYPE/FACING blockstate to find its one true paired half, instead
+     *  of grabbing the first same-block neighbor in any direction - otherwise two unrelated
+     *  chests (e.g. the last chest of one double-chest unit sitting next to the first chest of
+     *  the next unit) get mistaken for a pair and their icons get pulled toward each other. */
     private static Vec3 chestCenter(ClientLevel level, BlockPos pos) {
-        if (level.getBlockEntity(pos) instanceof ChestBlockEntity) {
-            var block = level.getBlockState(pos).getBlock();
-            for (Direction dir : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
-                BlockPos neighbor = pos.relative(dir);
+        if (!(level.getBlockEntity(pos) instanceof ChestBlockEntity)) {
+            return new Vec3(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+        }
+        BlockState state = level.getBlockState(pos);
+        if (state.getBlock() instanceof ChestBlock && state.hasProperty(ChestBlock.TYPE)) {
+            ChestType type = state.getValue(ChestBlock.TYPE);
+            if (type != ChestType.SINGLE && state.hasProperty(ChestBlock.FACING)) {
+                Direction facing = state.getValue(ChestBlock.FACING);
+                Direction connected = type == ChestType.LEFT ? facing.getClockWise() : facing.getCounterClockWise();
+                BlockPos neighbor = pos.relative(connected);
+                BlockState neighborState = level.getBlockState(neighbor);
                 if (level.getBlockEntity(neighbor) instanceof ChestBlockEntity
-                        && level.getBlockState(neighbor).getBlock() == block) {
+                        && neighborState.getBlock() == state.getBlock()) {
                     return new Vec3((pos.getX() + neighbor.getX()) / 2.0 + 0.5, pos.getY(),
                             (pos.getZ() + neighbor.getZ()) / 2.0 + 0.5);
                 }

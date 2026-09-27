@@ -70,6 +70,22 @@ public enum ItemCategory {
     }
 
     /**
+     * The broader category to fall back to when this category has no dedicated chest.
+     * E.g. stone with no "Stone & Deepslate" chest around goes to the "Blocks" chest,
+     * and a sword with no "Weapons" chest goes to the "Tools" chest - each specific
+     * category still gets first pick of its own chest; this is only the next rung down
+     * before ever being treated as unclassifiable overflow. Returns null when a category
+     * has no sensible broader home to fall back to (e.g. Food, Armor, Misc itself).
+     */
+    public static ItemCategory broadFallback(ItemCategory category) {
+        return switch (category) {
+            case STONE_AND_DEEPSLATE, WOOD, REDSTONE, DYES_AND_DECORATION, ORES_AND_INGOTS -> BLOCKS;
+            case WEAPONS -> TOOLS;
+            default -> null;
+        };
+    }
+
+    /**
      * Best-effort classification of an ItemStack into a single category.
      * Uses vanilla item classes and tags first (cheap, reliable), falls back
      * to MISC when nothing matches.
