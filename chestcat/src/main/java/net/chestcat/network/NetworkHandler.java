@@ -7,7 +7,11 @@ import net.chestcat.GroupingConfig;
 import net.chestcat.InventorySorter;
 import net.chestcat.ItemCategory;
 import net.chestcat.ItemGrouping;
+import net.chestcat.SortLayoutPrefs;
 import net.chestcat.data.ChestCategoryData;
+import net.chestcat.data.LockedSlotsData;
+import net.chestcat.data.ProtectedItemsData;
+import net.chestcat.data.SortProfileData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -47,6 +51,23 @@ public class NetworkHandler {
         registrar.playToServer(SetSortLayoutPayload.TYPE, SetSortLayoutPayload.STREAM_CODEC, NetworkHandler::handleToggleColumnFill);
         registrar.playToServer(DumpChestPayload.TYPE, DumpChestPayload.STREAM_CODEC, NetworkHandler::handleDumpChest);
         registrar.playToServer(SetGroupingConfigPayload.TYPE, SetGroupingConfigPayload.STREAM_CODEC, NetworkHandler::handleSetGroupingConfig);
+
+        // Item-level exclusions ("protected items") - client -> server toggle.
+        registrar.playToServer(ToggleProtectedItemPayload.TYPE, ToggleProtectedItemPayload.STREAM_CODEC, NetworkHandler::handleToggleProtectedItem);
+
+        // Sort profiles - client -> server requests, server -> client responses/applies.
+        registrar.playToServer(SaveSortProfilePayload.TYPE, SaveSortProfilePayload.STREAM_CODEC, NetworkHandler::handleSaveSortProfile);
+        registrar.playToServer(LoadSortProfilePayload.TYPE, LoadSortProfilePayload.STREAM_CODEC, NetworkHandler::handleLoadSortProfile);
+        registrar.playToServer(DeleteSortProfilePayload.TYPE, DeleteSortProfilePayload.STREAM_CODEC, NetworkHandler::handleDeleteSortProfile);
+        registrar.playToServer(RequestSortProfilesPayload.TYPE, RequestSortProfilesPayload.STREAM_CODEC, NetworkHandler::handleRequestSortProfiles);
+        registrar.playToClient(SortProfilesResponsePayload.TYPE, SortProfilesResponsePayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleProfilesResponse(payload));
+        registrar.playToClient(ApplyProfileModesPayload.TYPE, ApplyProfileModesPayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleApplyProfileModes(payload));
+        registrar.playToClient(ApplyProfileLayoutPayload.TYPE, ApplyProfileLayoutPayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleApplyProfileLayout(payload));
+        registrar.playToClient(ApplyProfileGroupingPayload.TYPE, ApplyProfileGroupingPayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleApplyProfileGrouping(payload));
     }
 
     private static void handleRequestNearby(RequestNearbyChestsPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
@@ -62,6 +83,11 @@ public class NetworkHandler {
             for (ChestUtil.Storage storage : storages) {
                 ItemGrouping.Key assigned = data.getKey(storage.canonicalPos()).orElse(null);
                 String categoryName = assigned != null ? assigned.storageKey() : "UNASSIGNED";
+                // Flag suffix (never a real category name, so it can't collide with one) - lets
+                // the client show an [EXCLUDED] tag without changing the payload's wire format.
+                if (data.isExcluded(storage.canonicalPos())) {
+                    categoryName += "|EX";
+                }
                 ItemGrouping.Key autoKey = ChestSorter.detectDominantKey(storage.container(), grouping);
 
                 int itemCount = 0;
@@ -77,8 +103,7 @@ public class NetworkHandler {
                 };
 
                 entries.add(new NearbyChestsResponsePayload.Entry(
-                        storage.canonicalPos(), categoryName, autoKey.storageKey(), itemCount, free, kindTag,
-                        data.isExcluded(storage.canonicalPos())));
+                        storage.canonicalPos(), categoryName, autoKey.storageKey(), itemCount, free, kindTag));
             }
 
             for (BlockPos enderPos : ChestUtil.findNearbyEnderChests(level, player.blockPosition(), payload.radius())) {
@@ -90,7 +115,7 @@ public class NetworkHandler {
                     if (stack.isEmpty()) free++; else itemCount += stack.getCount();
                 }
                 entries.add(new NearbyChestsResponsePayload.Entry(
-                        enderPos, "UNASSIGNED", "MISC", itemCount, free, "ENDER_CHEST", false));
+                        enderPos, "UNASSIGNED", "MISC", itemCount, free, "ENDER_CHEST"));
             }
 
             context.reply(new NearbyChestsResponsePayload(entries));
@@ -181,7 +206,8 @@ public class NetworkHandler {
     private static void handleToggleSlotLock(ToggleSlotLockPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            net.chestcat.LockedSlots.toggle(player.getUUID(), payload.slotIndex());
+            // Persisted (survives restarts) - replaces the old session-only net.chestcat.LockedSlots.
+            LockedSlotsData.get(player.serverLevel()).toggle(player.getUUID(), payload.slotIndex());
         });
     }
 
@@ -202,7 +228,7 @@ public class NetworkHandler {
     private static void handleToggleColumnFill(SetSortLayoutPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            net.chestcat.SortLayoutPrefs.set(player.getUUID(), new net.chestcat.SortLayoutPrefs.Settings(
+            SortLayoutPrefs.set(player.getUUID(), new SortLayoutPrefs.Settings(
                     payload.layout(), payload.reverse(), payload.includeHotbar(),
                     payload.groupArmorBySlot(), payload.tiebreakPriority(), payload.floatEnchantedFirst()));
         });
@@ -219,6 +245,71 @@ public class NetworkHandler {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
             net.chestcat.DumpChestIntoInventory.run(player);
+        });
+    }
+
+    // --- Item-level exclusions ("protected items") ---
+
+    private static void handleToggleProtectedItem(ToggleProtectedItemPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            ItemStack stack = player.getInventory().getItem(payload.slotIndex());
+            if (stack.isEmpty()) return;
+            boolean nowProtected = ProtectedItemsData.get(player.serverLevel()).toggle(stack);
+            player.sendSystemMessage((nowProtected
+                    ? Component.literal("Protected " + stack.getHoverName().getString() + " - auto-sort will never move it.").withStyle(ChatFormatting.YELLOW)
+                    : Component.literal("Unprotected " + stack.getHoverName().getString() + ".").withStyle(ChatFormatting.GREEN)));
+        });
+    }
+
+    // --- Sort profiles ---
+
+    private static void handleSaveSortProfile(SaveSortProfilePayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            ServerLevel level = player.serverLevel();
+            SortLayoutPrefs.Settings layout = SortLayoutPrefs.get(player.getUUID());
+            GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
+            SortProfileData.get(level).save(player.getUUID(), payload.name(), new SortProfileData.Profile(
+                    payload.inventoryMode(), payload.chestMode(), payload.nearbyMode(), layout, grouping));
+            player.sendSystemMessage(Component.literal("Saved sort profile \"" + payload.name() + "\".").withStyle(ChatFormatting.GREEN));
+            context.reply(new SortProfilesResponsePayload(SortProfileData.get(level).names(player.getUUID())));
+        });
+    }
+
+    private static void handleLoadSortProfile(LoadSortProfilePayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            ServerLevel level = player.serverLevel();
+            SortProfileData.get(level).get(player.getUUID(), payload.name()).ifPresentOrElse(profile -> {
+                // Update the server-side session state (mirrors what SetSortLayoutPayload /
+                // SetGroupingConfigPayload normally do) as well as pushing it back to the client.
+                SortLayoutPrefs.set(player.getUUID(), profile.layout());
+                GroupingConfig.set(player.getUUID(), profile.grouping());
+
+                context.reply(new ApplyProfileModesPayload(profile.inventoryMode(), profile.chestMode(), profile.nearbyMode()));
+                context.reply(ApplyProfileLayoutPayload.of(profile.layout()));
+                context.reply(ApplyProfileGroupingPayload.of(profile.grouping()));
+
+                player.sendSystemMessage(Component.literal("Loaded sort profile \"" + payload.name() + "\".").withStyle(ChatFormatting.GREEN));
+            }, () -> player.sendSystemMessage(Component.literal("No such profile: \"" + payload.name() + "\".").withStyle(ChatFormatting.RED)));
+        });
+    }
+
+    private static void handleDeleteSortProfile(DeleteSortProfilePayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            ServerLevel level = player.serverLevel();
+            SortProfileData.get(level).delete(player.getUUID(), payload.name());
+            context.reply(new SortProfilesResponsePayload(SortProfileData.get(level).names(player.getUUID())));
+        });
+    }
+
+    private static void handleRequestSortProfiles(RequestSortProfilesPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            ServerLevel level = player.serverLevel();
+            context.reply(new SortProfilesResponsePayload(SortProfileData.get(level).names(player.getUUID())));
         });
     }
 }

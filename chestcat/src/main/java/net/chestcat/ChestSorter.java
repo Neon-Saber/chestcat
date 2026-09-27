@@ -1,6 +1,7 @@
 package net.chestcat;
 
 import net.chestcat.data.ChestCategoryData;
+import net.chestcat.data.ProtectedItemsData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -21,12 +22,19 @@ public final class ChestSorter {
         ServerLevel level = player.serverLevel();
         BlockPos center = player.blockPosition();
         ChestCategoryData data = ChestCategoryData.get(level);
+        ProtectedItemsData protectedItems = ProtectedItemsData.get(level);
         SortLayoutPrefs.Settings layout = SortLayoutPrefs.get(player.getUUID());
         GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
         CustomGroups.refresh();
 
         List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, center, radius);
-        storages.removeIf(storage -> data.isExcluded(storage.canonicalPos()));
+        // Whitelist mode overrides everything else: only whitelisted chests participate,
+        // full stop. Otherwise the normal per-chest exclude flag applies as before.
+        if (data.isWhitelistMode()) {
+            storages.removeIf(storage -> !data.isWhitelisted(storage.canonicalPos()));
+        } else {
+            storages.removeIf(storage -> data.isExcluded(storage.canonicalPos()));
+        }
         if (storages.isEmpty()) {
             return new Result(0, 0, 0);
         }
@@ -47,9 +55,11 @@ public final class ChestSorter {
             allContainersInOrder.add(storage.container());
         }
 
+        // Protected item types are left exactly where they are - never pulled into the
+        // shared pool, so they can never be redistributed to a different chest.
         List<ItemStack> pool = new ArrayList<>();
         for (ChestUtil.Storage storage : storages) {
-            pool.addAll(ChestUtil.extractAll(storage.container()));
+            pool.addAll(ChestUtil.extractAll(storage.container(), protectedItems::isProtected));
         }
 
         // Identical stacks merge first, then everything is laid out in sort order, so the same items
@@ -119,7 +129,7 @@ public final class ChestSorter {
         }
 
         for (Container c : allContainersInOrder) {
-            sortContainerContents(c, sortMode, layout);
+            sortContainerContents(c, sortMode, layout, protectedItems::isProtected);
         }
 
         return new Result(moved, dropped, storages.size());
@@ -155,22 +165,32 @@ public final class ChestSorter {
     }
 
     public static void sortContainer(Container container, ItemSortMode mode) {
-        sortContainerContents(container, mode, SortLayoutPrefs.Settings.DEFAULT);
+        sortContainerContents(container, mode, SortLayoutPrefs.Settings.DEFAULT, stack -> false);
     }
 
-    public static void sortContainer(Container container, ItemSortMode mode, UUID player) {
-        sortContainerContents(container, mode, SortLayoutPrefs.get(player));
+    public static void sortContainer(Container container, ItemSortMode mode, ServerPlayer player) {
+        sortContainerContents(container, mode, SortLayoutPrefs.get(player.getUUID()),
+                ProtectedItemsData.get(player.serverLevel())::isProtected);
     }
 
     private static void sortContainerContents(Container container, ItemSortMode mode,
-                                              SortLayoutPrefs.Settings layout) {
+                                              SortLayoutPrefs.Settings layout,
+                                              java.util.function.Predicate<ItemStack> protect) {
         int size = container.getContainerSize();
         if (size == 0) return;
 
+        // A protected stack is left in its slot entirely - never picked up, so it
+        // can't be reordered or moved even within the same container.
         List<ItemStack> items = new ArrayList<>();
+        boolean[] protectedSlot = new boolean[size];
         for (int i = 0; i < size; i++) {
             ItemStack s = container.getItem(i);
-            if (!s.isEmpty()) items.add(s.copy());
+            if (s.isEmpty()) continue;
+            if (protect.test(s)) {
+                protectedSlot[i] = true;
+                continue;
+            }
+            items.add(s.copy());
             container.setItem(i, ItemStack.EMPTY);
         }
 
@@ -181,7 +201,10 @@ public final class ChestSorter {
         int rows = size / cols;
         int[][] grid = new int[rows][cols];
         for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) grid[r][c] = r * cols + c;
+            for (int c = 0; c < cols; c++) {
+                int slot = r * cols + c;
+                grid[r][c] = protectedSlot[slot] ? -1 : slot;
+            }
         }
 
         List<Integer> order = SortGrid.fillOrder(grid, layout.layout(), layout.reverse());

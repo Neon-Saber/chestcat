@@ -103,8 +103,20 @@ public class NearbyChestsScreen extends Screen {
 
     private static String sortLabel(NearbyChestsResponsePayload.Entry e) {
         if ("ENDER_CHEST".equals(e.kindTag())) return "Ender Chest";
-        String name = "UNASSIGNED".equals(e.categoryName()) ? e.autoCategoryName() : e.categoryName();
+        String base = baseName(e.categoryName());
+        String name = "UNASSIGNED".equals(base) ? e.autoCategoryName() : base;
         return ItemGrouping.Key.parse(name).displayName();
+    }
+
+    /** categoryName carries a "|EX" flag suffix for excluded chests (see NetworkHandler) -
+     *  strips it off so the rest of the client can treat categoryName as a plain storage key. */
+    private static String baseName(String categoryName) {
+        int i = categoryName.indexOf('|');
+        return i < 0 ? categoryName : categoryName.substring(0, i);
+    }
+
+    private static boolean isExcludedFlag(String categoryName) {
+        return categoryName.contains("|EX");
     }
 
     private static String prettyModName(String modId) {
@@ -189,12 +201,12 @@ public class NearbyChestsScreen extends Screen {
                                 int mouseX, int mouseY, boolean hovering, float partialTick) {
                 this.lastLeft = left; this.lastTop = top; this.lastWidth = width; this.lastHeight = height;
 
+                boolean excluded = isExcludedFlag(data.categoryName());
+
                 int rowPad = 2;
                 int rowBg = hovering ? 0x40FFFFFF : (index % 2 == 0 ? 0x1AFFFFFF : 0x00000000);
+                if (excluded) rowBg = hovering ? 0x50FF5555 : (index % 2 == 0 ? 0x30FF5555 : 0x20FF5555);
                 graphics.fill(left + 2, top + rowPad, left + width - 2, top + height - rowPad, rowBg);
-                if (data.excluded()) {
-                    graphics.fill(left + 2, top + rowPad, left + width - 2, top + height - rowPad, 0x30FF4444);
-                }
 
                 int badgeSize = 16;
                 int badgeY = top + (height - badgeSize) / 2;
@@ -206,18 +218,22 @@ public class NearbyChestsScreen extends Screen {
                 int textLeft = left + 4 + badgeSize + 8;
 
                 boolean isEnder = "ENDER_CHEST".equals(data.kindTag());
+                String base = baseName(data.categoryName());
                 String categoryLabel = isEnder
                         ? "Shared ender inventory"
-                        : ("UNASSIGNED".equals(data.categoryName())
+                        : ("UNASSIGNED".equals(base)
                                 ? prettyName(data.autoCategoryName())
-                                : prettyName(data.categoryName()));
-                if (data.excluded()) categoryLabel += "  [EXCLUDED]";
+                                : prettyName(base));
 
                 int locateWidth = NearbyChestsScreen.this.font.width("Locate") + 10;
                 int locateX = left + width - locateWidth - 6;
 
                 String distText = formatDistance(data.pos(), NearbyChestsScreen.this.minecraft.player);
                 graphics.drawString(NearbyChestsScreen.this.font, categoryLabel, textLeft, top + 4, 0xFFFFFF);
+                if (excluded) {
+                    int tagX = textLeft + NearbyChestsScreen.this.font.width(categoryLabel) + 6;
+                    graphics.drawString(NearbyChestsScreen.this.font, "[EXCLUDED]", tagX, top + 4, 0xFFFF5555);
+                }
 
                 String subText = isEnder
                         ? distText

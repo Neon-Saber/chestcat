@@ -1,5 +1,7 @@
 package net.chestcat;
 
+import net.chestcat.data.LockedSlotsData;
+import net.chestcat.data.ProtectedItemsData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -26,9 +28,10 @@ public final class QuickStack {
     public static int run(ServerPlayer player) {
         ServerLevel level = player.serverLevel();
         BlockPos center = player.blockPosition();
-        Set<Integer> locked = LockedSlots.get(player.getUUID());
+        Set<Integer> locked = LockedSlotsData.get(player.serverLevel()).get(player.getUUID());
         Inventory inv = player.getInventory();
         net.chestcat.data.ChestCategoryData data = net.chestcat.data.ChestCategoryData.get(level);
+        ProtectedItemsData protectedItems = ProtectedItemsData.get(level);
         int moved = 0;
 
         for (BlockPos pos : BlockPos.betweenClosed(
@@ -36,12 +39,14 @@ public final class QuickStack {
                 center.offset(RADIUS, RADIUS, RADIUS))) {
             BlockEntity be = level.getBlockEntity(pos);
             if (!(be instanceof Container container) || !ChestUtil.isStorage(level, pos, be)) continue;
-            if (data.isExcluded(ChestUtil.canonicalChestPos(level, pos))) continue;
+            BlockPos canonical = ChestUtil.canonicalChestPos(level, pos);
+            if (data.isExcluded(canonical)) continue;
+            if (data.isWhitelistMode() && !data.isWhitelisted(canonical)) continue;
 
             for (int i = MAIN_START; i < MAIN_END; i++) {
                 if (locked.contains(i)) continue;
                 ItemStack stack = inv.getItem(i);
-                if (stack.isEmpty() || !containerHasMatching(container, stack)) continue;
+                if (stack.isEmpty() || protectedItems.isProtected(stack) || !containerHasMatching(container, stack)) continue;
 
                 int remaining = stack.getCount();
                 for (int c = 0; c < container.getContainerSize() && remaining > 0; c++) {

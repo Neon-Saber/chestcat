@@ -154,14 +154,19 @@ public final class ChestUtil {
 
     /** Removes and returns copies of every non-empty stack in the container, then clears it. */
     public static List<ItemStack> extractAll(Container container) {
+        return extractAll(container, stack -> false);
+    }
+
+    /** Like {@link #extractAll(Container)}, but leaves any stack matched by {@code protect}
+     *  untouched in its original slot instead of extracting it. */
+    public static List<ItemStack> extractAll(Container container, java.util.function.Predicate<ItemStack> protect) {
         List<ItemStack> stacks = new ArrayList<>();
         for (int i = 0; i < container.getContainerSize(); i++) {
             ItemStack stack = container.getItem(i);
-            if (!stack.isEmpty()) {
-                stacks.add(stack.copy());
-            }
+            if (stack.isEmpty() || protect.test(stack)) continue;
+            stacks.add(stack.copy());
+            container.setItem(i, ItemStack.EMPTY);
         }
-        container.clearContent();
         return stacks;
     }
 

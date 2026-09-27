@@ -1,5 +1,7 @@
 package net.chestcat;
 
+import net.chestcat.data.LockedSlotsData;
+import net.chestcat.data.ProtectedItemsData;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
@@ -21,14 +23,15 @@ public final class DumpIntoChest {
     public static int run(ServerPlayer player) {
         if (!(player.containerMenu instanceof ChestMenu chestMenu)) return 0;
         Container container = chestMenu.getSlot(0).container;
-        Set<Integer> locked = LockedSlots.get(player.getUUID());
+        Set<Integer> locked = LockedSlotsData.get(player.serverLevel()).get(player.getUUID());
+        ProtectedItemsData protectedItems = ProtectedItemsData.get(player.serverLevel());
         Inventory inv = player.getInventory();
         int moved = 0;
 
         for (int i = MAIN_START; i < MAIN_END; i++) {
             if (locked.contains(i)) continue;
             ItemStack stack = inv.getItem(i);
-            if (stack.isEmpty()) continue;
+            if (stack.isEmpty() || protectedItems.isProtected(stack)) continue;
 
             int remaining = stack.getCount();
             for (int c = 0; c < container.getContainerSize() && remaining > 0; c++) {

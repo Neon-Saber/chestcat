@@ -1,5 +1,7 @@
 package net.chestcat;
 
+import net.chestcat.data.LockedSlotsData;
+import net.chestcat.data.ProtectedItemsData;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
@@ -18,16 +20,20 @@ public final class InventorySorter {
 
     public static int sortMainInventory(ServerPlayer player, ItemSortMode mode) {
         Inventory inv = player.getInventory();
-        Set<Integer> locked = LockedSlots.get(player.getUUID());
+        Set<Integer> locked = LockedSlotsData.get(player.serverLevel()).get(player.getUUID());
+        ProtectedItemsData protectedItems = ProtectedItemsData.get(player.serverLevel());
         SortLayoutPrefs.Settings prefs = SortLayoutPrefs.get(player.getUUID());
 
         // Visual grid, top row first: 3 main rows, then the hotbar row if it's included.
+        // A protected item's slot is skipped the same way a locked slot is, so
+        // protected stacks are never picked up or moved by inventory sorting.
         int rows = prefs.includeHotbar() ? MAIN_ROWS + 1 : MAIN_ROWS;
         int[][] grid = new int[rows][COLS];
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < COLS; c++) {
                 int slot = r < MAIN_ROWS ? MAIN_FIRST_SLOT + r * COLS + c : c;
-                grid[r][c] = locked.contains(slot) ? -1 : slot;
+                boolean skip = locked.contains(slot) || protectedItems.isProtected(inv.getItem(slot));
+                grid[r][c] = skip ? -1 : slot;
             }
         }
 

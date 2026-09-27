@@ -29,6 +29,10 @@ public class ChestCategoryData extends SavedData {
 
     private final Map<BlockPos, ItemGrouping.Key> categories = new HashMap<>();
     private final java.util.Set<BlockPos> excluded = new java.util.HashSet<>();
+    private final java.util.Set<BlockPos> whitelisted = new java.util.HashSet<>();
+    /** When on, Sort Nearby and QuickStack only ever touch chests in {@link #whitelisted} -
+     *  everything else is treated as excluded, regardless of the exclude set above. */
+    private boolean whitelistMode = false;
 
     public static ChestCategoryData get(ServerLevel level) {
         DimensionDataStorage storage = level.getDataStorage();
@@ -76,6 +80,31 @@ public class ChestCategoryData extends SavedData {
         return nowExcluded;
     }
 
+    /** Whether a chest is on the whitelist (only meaningful, on its own, when whitelist mode is on). */
+    public boolean isWhitelisted(BlockPos pos) {
+        return whitelisted.contains(pos.immutable());
+    }
+
+    /** Flips whitelist membership for this chest and returns the new state. */
+    public boolean toggleWhitelisted(BlockPos pos) {
+        BlockPos key = pos.immutable();
+        boolean nowWhitelisted = whitelisted.add(key);
+        if (!nowWhitelisted) whitelisted.remove(key);
+        setDirty();
+        return nowWhitelisted;
+    }
+
+    public boolean isWhitelistMode() {
+        return whitelistMode;
+    }
+
+    /** Flips whitelist-only mode for this dimension and returns the new state. */
+    public boolean toggleWhitelistMode() {
+        whitelistMode = !whitelistMode;
+        setDirty();
+        return whitelistMode;
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, net.minecraft.core.HolderLookup.Provider registries) {
         ListTag list = new ListTag();
@@ -98,6 +127,17 @@ public class ChestCategoryData extends SavedData {
             excludedList.add(posTag);
         }
         tag.put("excluded", excludedList);
+
+        ListTag whitelistedList = new ListTag();
+        for (BlockPos pos : whitelisted) {
+            CompoundTag posTag = new CompoundTag();
+            posTag.putInt("x", pos.getX());
+            posTag.putInt("y", pos.getY());
+            posTag.putInt("z", pos.getZ());
+            whitelistedList.add(posTag);
+        }
+        tag.put("whitelisted", whitelistedList);
+        tag.putBoolean("whitelistMode", whitelistMode);
         return tag;
     }
 
@@ -123,6 +163,13 @@ public class ChestCategoryData extends SavedData {
             CompoundTag posTag = excludedList.getCompound(i);
             data.excluded.add(new BlockPos(posTag.getInt("x"), posTag.getInt("y"), posTag.getInt("z")));
         }
+
+        ListTag whitelistedList = tag.getList("whitelisted", StringTag.TAG_COMPOUND);
+        for (int i = 0; i < whitelistedList.size(); i++) {
+            CompoundTag posTag = whitelistedList.getCompound(i);
+            data.whitelisted.add(new BlockPos(posTag.getInt("x"), posTag.getInt("y"), posTag.getInt("z")));
+        }
+        data.whitelistMode = tag.getBoolean("whitelistMode");
         return data;
     }
 }

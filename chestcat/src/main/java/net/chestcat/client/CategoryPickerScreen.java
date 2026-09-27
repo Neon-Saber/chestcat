@@ -84,12 +84,11 @@ public class CategoryPickerScreen extends Screen {
                 .build());
 
         int nextRowY = startY + resetRow * (buttonHeight + gap) + 36;
+
+        // Exclude is a chest-wide toggle, not tied to a category - only offered on the main page.
         if (subOf == null) {
-            // Whole-chest exclusion only makes sense on the main page, not a sub-type page.
-            boolean excluded = ClientChestCategoryCache.isExcluded(pos);
-            this.addRenderableWidget(Button.builder(
-                            Component.literal(excluded ? "Re-include This Chest" : "Exclude This Chest"),
-                            b -> toggleExcluded())
+            this.addRenderableWidget(Button.builder(Component.literal("Exclude / Re-include This Chest"),
+                            b -> assign("EXCLUDED"))
                     .bounds(this.width / 2 - 100, nextRowY, 200, 20)
                     .build());
             nextRowY += 26;
@@ -98,15 +97,6 @@ public class CategoryPickerScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal(subOf == null ? "Cancel" : "Back"), b -> this.onClose())
                 .bounds(this.width / 2 - 100, nextRowY, 200, 20)
                 .build());
-    }
-
-    /**
-     * Excluded chests are skipped entirely by Sort All Nearby, QuickStack, and the floating
-     * category icon - separate from (and independent of) whatever category is assigned.
-     */
-    private void toggleExcluded() {
-        PacketDistributor.sendToServer(new AssignCategoryPayload(pos, "EXCLUDED"));
-        this.minecraft.setScreen(parent);
     }
 
     /** First page: a splittable category opens the sub-type page; everything else assigns immediately. */
