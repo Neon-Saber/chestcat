@@ -1,0 +1,142 @@
+package net.chestcat.client;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.math.Axis;
+import net.chestcat.CustomGroups;
+import net.chestcat.ItemGrouping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemDisplayContext;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Draws a small spinning icon of each chest's category (or sub-type) floating just above it.
+ * Uses vanilla items as icons, so no textures are needed. Toggle from Sort Options.
+ */
+@EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
+public class ChestCatIndicatorRenderer {
+
+    /** Toggled from the Sort Options screen. */
+    public static boolean enabled = true;
+
+    private static final double MAX_DISTANCE = 24.0;
+    private static final double HEIGHT_ABOVE_BLOCK = 1.35;
+    private static final float ICON_SCALE = 0.9f;
+
+    private static final Map<ItemGrouping.Key, ItemStack> ICONS = new HashMap<>();
+
+    @SubscribeEvent
+    public static void onRenderLevel(RenderLevelStageEvent event) {
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
+        if (!enabled) return;
+
+        Map<BlockPos, ClientChestCategoryCache.Entry> cache = ClientChestCategoryCache.snapshot();
+        if (cache.isEmpty()) return;
+
+        Minecraft mc = Minecraft.getInstance();
+        ClientLevel level = mc.level;
+        if (level == null || mc.player == null) return;
+
+        Vec3 cam = event.getCamera().getPosition();
+        PoseStack pose = event.getPoseStack();
+        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+
+        long now = System.currentTimeMillis();
+        float spin = (now % 4000L) / 4000f * 360f;
+        double maxDistSq = MAX_DISTANCE * MAX_DISTANCE;
+        boolean drewAny = false;
+
+        for (Map.Entry<BlockPos, ClientChestCategoryCache.Entry> entry : cache.entrySet()) {
+            BlockPos pos = entry.getKey();
+            ClientChestCategoryCache.Entry data = entry.getValue();
+            if (now - data.lastSeenMs() > ClientChestCategoryCache.EXPIRE_MS) continue;
+
+            double dx = pos.getX() + 0.5 - cam.x;
+            double dy = pos.getY() - cam.y;
+            double dz = pos.getZ() + 0.5 - cam.z;
+            if (dx * dx + dy * dy + dz * dz > maxDistSq) continue;
+            if (level.getBlockEntity(pos) == null) continue; // broken, or not loaded on the client
+
+            double bob = Math.sin(now / 500.0 + pos.getX() * 0.7 + pos.getZ() * 1.3) * 0.04;
+
+            pose.pushPose();
+            pose.translate(dx, dy + HEIGHT_ABOVE_BLOCK + bob, dz);
+            pose.mulPose(Axis.YP.rotationDegrees(spin));
+            pose.scale(ICON_SCALE, ICON_SCALE, ICON_SCALE);
+            mc.getItemRenderer().renderStatic(iconFor(data.key()), ItemDisplayContext.FIXED,
+                    LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY, pose, buffers, level, 0);
+            pose.popPose();
+            drewAny = true;
+        }
+
+        if (drewAny) buffers.endBatch();
+    }
+
+    private static ItemStack iconFor(ItemGrouping.Key key) {
+        return ICONS.computeIfAbsent(key, k -> new ItemStack(pickItem(k)));
+    }
+
+    private static Item pickItem(ItemGrouping.Key key) {
+        String sub = key.subKey();
+        return switch (key.category()) {
+            case TOOLS -> Items.IRON_PICKAXE;
+            case WEAPONS -> Items.IRON_SWORD;
+            case ARMOR -> Items.IRON_CHESTPLATE;
+            case FOOD -> Items.COOKED_BEEF;
+            case ORES_AND_INGOTS -> "raw".equals(sub) ? Items.RAW_IRON : Items.IRON_INGOT;
+            case REDSTONE -> Items.REDSTONE;
+            case POTIONS_AND_BREWING -> Items.BREWING_STAND;
+            case DYES_AND_DECORATION -> Items.RED_DYE;
+            case WOOD -> woodIcon(sub);
+            case STONE_AND_DEEPSLATE -> stoneIcon(sub);
+            case BLOCKS -> Items.BRICKS;
+            case MISC -> Items.ENDER_PEARL;
+            case CUSTOM -> CustomGroups.iconItem(sub);
+        };
+    }
+
+    private static Item woodIcon(String sub) {
+        if (sub == null) return Items.OAK_LOG;
+        return switch (sub) {
+            case "spruce" -> Items.SPRUCE_LOG;
+            case "birch" -> Items.BIRCH_LOG;
+            case "jungle" -> Items.JUNGLE_LOG;
+            case "acacia" -> Items.ACACIA_LOG;
+            case "dark_oak" -> Items.DARK_OAK_LOG;
+            case "mangrove" -> Items.MANGROVE_LOG;
+            case "cherry" -> Items.CHERRY_LOG;
+            case "bamboo" -> Items.BAMBOO_BLOCK;
+            case "crimson" -> Items.CRIMSON_STEM;
+            case "warped" -> Items.WARPED_STEM;
+            default -> Items.OAK_LOG;
+        };
+    }
+
+    private static Item stoneIcon(String sub) {
+        if (sub == null) return Items.STONE;
+        return switch (sub) {
+            case "deepslate" -> Items.DEEPSLATE;
+            case "cobblestone" -> Items.COBBLESTONE;
+            case "blackstone" -> Items.BLACKSTONE;
+            case "andesite" -> Items.ANDESITE;
+            case "diorite" -> Items.DIORITE;
+            case "granite" -> Items.GRANITE;
+            case "tuff" -> Items.TUFF;
+            default -> Items.STONE;
+        };
+    }
+}

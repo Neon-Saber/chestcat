@@ -2,8 +2,11 @@ package net.chestcat.network;
 
 import net.chestcat.ChestSorter;
 import net.chestcat.ChestUtil;
+import net.chestcat.CustomGroups;
+import net.chestcat.GroupingConfig;
 import net.chestcat.InventorySorter;
 import net.chestcat.ItemCategory;
+import net.chestcat.ItemGrouping;
 import net.chestcat.data.ChestCategoryData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -43,6 +46,7 @@ public class NetworkHandler {
         registrar.playToServer(SortIntoChestPayload.TYPE, SortIntoChestPayload.STREAM_CODEC, NetworkHandler::handleSortIntoChest);
         registrar.playToServer(SetSortLayoutPayload.TYPE, SetSortLayoutPayload.STREAM_CODEC, NetworkHandler::handleToggleColumnFill);
         registrar.playToServer(DumpChestPayload.TYPE, DumpChestPayload.STREAM_CODEC, NetworkHandler::handleDumpChest);
+        registrar.playToServer(SetGroupingConfigPayload.TYPE, SetGroupingConfigPayload.STREAM_CODEC, NetworkHandler::handleSetGroupingConfig);
     }
 
     private static void handleRequestNearby(RequestNearbyChestsPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
@@ -50,14 +54,15 @@ public class NetworkHandler {
             if (!(context.player() instanceof ServerPlayer player)) return;
             ServerLevel level = player.serverLevel();
             ChestCategoryData data = ChestCategoryData.get(level);
+            GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
 
             List<NearbyChestsResponsePayload.Entry> entries = new ArrayList<>();
 
             List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, player.blockPosition(), payload.radius());
             for (ChestUtil.Storage storage : storages) {
-                ItemCategory assigned = data.getCategory(storage.canonicalPos()).orElse(null);
-                String categoryName = assigned != null ? assigned.name() : "UNASSIGNED";
-                ItemCategory autoCategory = ChestSorter.detectDominantCategory(storage.container());
+                ItemGrouping.Key assigned = data.getKey(storage.canonicalPos()).orElse(null);
+                String categoryName = assigned != null ? assigned.storageKey() : "UNASSIGNED";
+                ItemGrouping.Key autoKey = ChestSorter.detectDominantKey(storage.container(), grouping);
 
                 int itemCount = 0;
                 for (int i = 0; i < storage.container().getContainerSize(); i++) {
@@ -72,7 +77,7 @@ public class NetworkHandler {
                 };
 
                 entries.add(new NearbyChestsResponsePayload.Entry(
-                        storage.canonicalPos(), categoryName, autoCategory.name(), itemCount, free, kindTag));
+                        storage.canonicalPos(), categoryName, autoKey.storageKey(), itemCount, free, kindTag));
             }
 
             for (BlockPos enderPos : ChestUtil.findNearbyEnderChests(level, player.blockPosition(), payload.radius())) {
@@ -98,20 +103,40 @@ public class NetworkHandler {
             BlockEntity be = level.getBlockEntity(payload.pos());
             if (be == null) return;
 
+            // A double chest's two halves must resolve to the same saved key as
+            // ChestSorter uses when actually filling it, whichever half was clicked.
+            BlockPos pos = ChestUtil.canonicalChestPos(level, payload.pos());
+
             ChestCategoryData data = ChestCategoryData.get(level);
             if (payload.categoryName().equals("AUTO")) {
-                data.clearCategory(payload.pos());
+                data.clearCategory(pos);
                 player.sendSystemMessage(Component.literal("Chest category reset to auto-detect.").withStyle(ChatFormatting.GRAY));
                 return;
             }
 
-            try {
-                ItemCategory category = ItemCategory.valueOf(payload.categoryName());
-                data.setCategory(payload.pos(), category);
-                player.sendSystemMessage(Component.literal("Chest set to category: " + category.getDisplayName()).withStyle(ChatFormatting.GREEN));
-            } catch (IllegalArgumentException ignored) {
-            }
+            ItemGrouping.Key key = parseAssignableKey(payload.categoryName());
+            if (key == null) return;
+            data.setKey(pos, key);
+            player.sendSystemMessage(Component.literal("Chest set to category: " + key.displayName()).withStyle(ChatFormatting.GREEN));
         });
+    }
+
+    /** Parses "WOOD" or "WOOD:oak"; returns null for an unknown category or a sub-type that category can't split into. */
+    private static ItemGrouping.Key parseAssignableKey(String stored) {
+        int colon = stored.indexOf(':');
+        String categoryName = colon < 0 ? stored : stored.substring(0, colon);
+        String subKey = colon < 0 ? null : stored.substring(colon + 1);
+        try {
+            ItemCategory category = ItemCategory.valueOf(categoryName);
+            if (category == ItemCategory.CUSTOM) {
+                CustomGroups.refresh();
+                return subKey != null && CustomGroups.hasGroup(subKey) ? new ItemGrouping.Key(category, subKey) : null;
+            }
+            if (subKey != null && !ItemGrouping.isValidSubKey(category, subKey)) return null;
+            return new ItemGrouping.Key(category, subKey);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static void handleSortNearby(SortNearbyPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
@@ -168,7 +193,16 @@ public class NetworkHandler {
     private static void handleToggleColumnFill(SetSortLayoutPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            net.chestcat.SortLayoutPrefs.set(player.getUUID(), payload.layout(), payload.reverse(), payload.includeHotbar());
+            net.chestcat.SortLayoutPrefs.set(player.getUUID(), new net.chestcat.SortLayoutPrefs.Settings(
+                    payload.layout(), payload.reverse(), payload.includeHotbar(),
+                    payload.groupArmorBySlot(), payload.tiebreakPriority(), payload.floatEnchantedFirst()));
+        });
+    }
+
+    private static void handleSetGroupingConfig(SetGroupingConfigPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            GroupingConfig.set(player.getUUID(), payload.toSettings());
         });
     }
 

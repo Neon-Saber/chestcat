@@ -32,7 +32,8 @@ public class LocateModeRenderer {
         poseStack.pushPose();
         poseStack.translate(-camPos.x, -camPos.y, -camPos.z);
 
-        AABB box = new AABB(ChestCatClient.locateTarget).inflate(0.03);
+        AABB box = (ChestCatClient.locateBox != null
+                ? ChestCatClient.locateBox : new AABB(ChestCatClient.locateTarget)).inflate(0.03);
 
         float pulse = (float) (0.5 + 0.5 * Math.sin(System.currentTimeMillis() / 200.0));
         float alpha = 0.55f + 0.45f * pulse;

@@ -18,7 +18,7 @@ public record NearbyChestsResponsePayload(List<Entry> chests) implements CustomP
      * used by the client to sort/label chests that have no manual category assigned.
      */
     public record Entry(BlockPos pos, String categoryName, String autoCategoryName,
-                         int itemCount, int freeSlots, String kindTag) {}
+                        int itemCount, int freeSlots, String kindTag) {}
 
     public static final Type<NearbyChestsResponsePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath("chestcat", "nearby_response"));

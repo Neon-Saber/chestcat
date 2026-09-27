@@ -2,6 +2,11 @@ package net.chestcat;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
@@ -20,6 +25,28 @@ import java.util.Set;
 public final class ChestUtil {
 
     private ChestUtil() {}
+
+    // Common tags mods use to mark their chests / barrels (Iron Chests, Sophisticated Storage, etc.).
+    private static final TagKey<Block> CHESTS_TAG =
+            TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath("c", "chests"));
+    private static final TagKey<Block> BARRELS_TAG =
+            TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath("c", "barrels"));
+
+    /**
+     * Whether a block entity is real item STORAGE that ChestCat may sort into / pull from.
+     * Vanilla chests, trapped chests and barrels always are. Anything else that merely exposes a
+     * Container (furnaces, smokers, blast furnaces, hoppers, droppers, brewing stands, crafters,
+     * shulker boxes, modded machines...) is left completely alone unless a mod tags its block as
+     * c:chests / c:barrels, or you list it under "extraStorage" in config/chestcat/groups.json.
+     */
+    public static boolean isStorage(Level level, BlockPos pos, BlockEntity be) {
+        if (be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity) return true;
+        if (!(be instanceof Container)) return false;
+        BlockState state = level.getBlockState(pos);
+        if (state.is(CHESTS_TAG) || state.is(BARRELS_TAG)) return true;
+        CustomGroups.refresh();
+        return CustomGroups.isExtraStorage(BuiltInRegistries.BLOCK.getKey(state.getBlock()));
+    }
 
     public enum Kind { CHEST, BARREL, MODDED }
 
@@ -76,10 +103,9 @@ public final class ChestUtil {
             } else if (be instanceof EnderChestBlockEntity) {
                 // Handled separately - see findNearbyEnderChests.
                 visited.add(pos);
-            } else if (be instanceof Container container) {
-                // Anything else that exposes a real Container is modded storage
-                // (Iron Chests, Sophisticated Storage, etc.) - group it by the
-                // block's own registry namespace.
+            } else if (be instanceof Container container && isStorage(level, pos, be)) {
+                // Modded storage explicitly tagged as a chest/barrel (or allow-listed in the
+                // config) - grouped by the block's own registry namespace.
                 visited.add(pos);
                 String modId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).getNamespace();
                 result.add(new Storage(pos.immutable(), container, Kind.MODDED, modId));
@@ -105,7 +131,13 @@ public final class ChestUtil {
         return result;
     }
 
-    private static BlockPos canonicalChestPos(ServerLevel level, BlockPos pos) {
+    /**
+     * Whichever half of a (possibly double) chest sorts lower on X then Z - so both
+     * halves, and any code that only has one half's BlockPos (a raycast, a saved
+     * assignment), always resolve to the same key. Safe to call on a non-chest or
+     * single chest too: it just returns pos back.
+     */
+    public static BlockPos canonicalChestPos(Level level, BlockPos pos) {
         // Use whichever half sorts lower on X then Z as the canonical position,
         // so both halves of a double chest always resolve to the same key.
         BlockState state = level.getBlockState(pos);
