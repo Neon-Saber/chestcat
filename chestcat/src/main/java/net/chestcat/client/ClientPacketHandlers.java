@@ -3,6 +3,7 @@ package net.chestcat.client;
 import net.chestcat.network.ApplyProfileGroupingPayload;
 import net.chestcat.network.ApplyProfileLayoutPayload;
 import net.chestcat.network.ApplyProfileModesPayload;
+import net.chestcat.network.ChestCategoryUpdatePayload;
 import net.chestcat.network.NearbyChestsResponsePayload;
 import net.chestcat.network.NetworkHandler;
 import net.chestcat.network.SortProfilesResponsePayload;
@@ -67,6 +68,11 @@ public final class ClientPacketHandlers {
             ChestCatClient.chestSortMode = payload.chestMode();
             ChestCatClient.nearbySortMode = payload.nearbyMode();
         });
+    }
+
+    public static void handleChestCategoryUpdate(ChestCategoryUpdatePayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> ClientChestCategoryCache.updateOne(payload.entry()));
     }
 
     public static void handleNearbyResponse(NearbyChestsResponsePayload payload) {

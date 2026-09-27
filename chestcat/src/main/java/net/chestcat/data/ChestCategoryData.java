@@ -66,6 +66,30 @@ public class ChestCategoryData extends SavedData {
         }
     }
 
+    /**
+     * Called whenever two previously-single chests are found merged into a double chest.
+     * If the half that just lost canonical status still has a saved category, exclusion,
+     * whitelist, or lock from when it was its own chest, carry it over to the new
+     * canonical position instead of silently losing it.
+     */
+    public void migrateDoubleChest(BlockPos canonical, BlockPos nonCanonical) {
+        canonical = canonical.immutable();
+        nonCanonical = nonCanonical.immutable();
+        if (canonical.equals(nonCanonical)) return;
+        boolean changed = false;
+
+        ItemGrouping.Key staleKey = categories.remove(nonCanonical);
+        if (staleKey != null) {
+            categories.putIfAbsent(canonical, staleKey);
+            changed = true;
+        }
+        if (excluded.remove(nonCanonical)) { excluded.add(canonical); changed = true; }
+        if (whitelisted.remove(nonCanonical)) { whitelisted.add(canonical); changed = true; }
+        if (locked.remove(nonCanonical)) { locked.add(canonical); changed = true; }
+
+        if (changed) setDirty();
+    }
+
     /** Excluded chests are skipped by every bulk auto-sort operation (Sort All Nearby,
      * QuickStack), but a player can still open and use them completely normally. */
     public boolean isExcluded(BlockPos pos) {

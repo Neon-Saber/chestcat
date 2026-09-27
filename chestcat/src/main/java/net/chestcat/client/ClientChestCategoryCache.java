@@ -50,6 +50,27 @@ public class ClientChestCategoryCache {
         return e != null && e.excluded();
     }
 
+    /** Merges just one entry (e.g. right after the player changes a chest's category).
+     *  Unlike update(), never purges anything else already in the cache. */
+    public static void updateOne(NearbyChestsResponsePayload.Entry e) {
+        if ("ENDER_CHEST".equals(e.kindTag())) return;
+        boolean excluded = e.categoryName().contains("|EX");
+        String baseCategoryName = excluded ? e.categoryName().substring(0, e.categoryName().indexOf(':')) : e.categoryName();
+
+        ItemGrouping.Key key;
+        if (!"UNASSIGNED".equals(baseCategoryName)) {
+            key = ItemGrouping.Key.parse(baseCategoryName);
+        } else if (e.itemCount() > 0) {
+            key = ItemGrouping.Key.parse(e.autoCategoryName());
+        } else if (excluded) {
+            key = ItemGrouping.Key.parse(e.autoCategoryName());
+        } else {
+            CACHE.remove(e.pos().immutable());
+            return;
+        }
+        CACHE.put(e.pos().immutable(), new Entry(key, System.currentTimeMillis(), excluded));
+    }
+
     public static void update(List<NearbyChestsResponsePayload.Entry> chests, BlockPos playerPos) {
         long now = System.currentTimeMillis();
         Set<BlockPos> seen = new HashSet<>();

@@ -46,7 +46,7 @@ public class ChestCatIndicatorRenderer {
 
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_LEVEL) return;
         if (!enabled) return;
 
         Map<BlockPos, ClientChestCategoryCache.Entry> cache = ClientChestCategoryCache.snapshot();

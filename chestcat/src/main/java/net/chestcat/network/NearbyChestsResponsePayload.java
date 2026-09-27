@@ -26,7 +26,7 @@ public record NearbyChestsResponsePayload(List<Entry> chests) implements CustomP
     public static final Type<NearbyChestsResponsePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath("chestcat", "nearby_response"));
 
-    private static final StreamCodec<RegistryFriendlyByteBuf, Entry> ENTRY_CODEC = StreamCodec.composite(
+    static final StreamCodec<RegistryFriendlyByteBuf, Entry> ENTRY_CODEC = StreamCodec.composite(
             BlockPos.STREAM_CODEC, Entry::pos,
             ByteBufCodecs.STRING_UTF8, Entry::categoryName,
             ByteBufCodecs.STRING_UTF8, Entry::autoCategoryName,

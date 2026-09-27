@@ -85,7 +85,10 @@ public final class ChestUtil {
                 if (visited.contains(canonical)) continue;
                 visited.add(pos);
                 visited.add(canonical);
-                // Mark the connected half visited too, if any.
+                // Mark the connected half visited too, if any - and remember it, so a
+                // just-formed double chest can carry over the non-canonical half's stale
+                // per-chest data (category/exclude/whitelist/lock) instead of losing it.
+                BlockPos connectedOther = null;
                 for (net.minecraft.core.Direction dir : new net.minecraft.core.Direction[]{
                         net.minecraft.core.Direction.NORTH, net.minecraft.core.Direction.SOUTH,
                         net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.WEST}) {
@@ -93,7 +96,12 @@ public final class ChestUtil {
                     if (level.getBlockEntity(neighbor) instanceof ChestBlockEntity
                             && level.getBlockState(neighbor).getBlock() == state.getBlock()) {
                         visited.add(neighbor);
+                        connectedOther = neighbor;
                     }
+                }
+                BlockPos nonCanonical = pos.equals(canonical) ? connectedOther : pos;
+                if (nonCanonical != null && !nonCanonical.equals(canonical)) {
+                    net.chestcat.data.ChestCategoryData.get(level).migrateDoubleChest(canonical, nonCanonical.immutable());
                 }
 
                 result.add(new Storage(canonical, container, Kind.CHEST, "minecraft"));

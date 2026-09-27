@@ -41,6 +41,8 @@ public class NetworkHandler {
         registrar.playToServer(RequestNearbyChestsPayload.TYPE, RequestNearbyChestsPayload.STREAM_CODEC, NetworkHandler::handleRequestNearby);
         registrar.playToClient(NearbyChestsResponsePayload.TYPE, NearbyChestsResponsePayload.STREAM_CODEC,
                 (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleNearbyResponse(payload));
+        registrar.playToClient(ChestCategoryUpdatePayload.TYPE, ChestCategoryUpdatePayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleChestCategoryUpdate(payload));
         registrar.playToServer(AssignCategoryPayload.TYPE, AssignCategoryPayload.STREAM_CODEC, NetworkHandler::handleAssignCategory);
         registrar.playToServer(SortNearbyPayload.TYPE, SortNearbyPayload.STREAM_CODEC, NetworkHandler::handleSortNearby);
         registrar.playToServer(SortInventoryPayload.TYPE, SortInventoryPayload.STREAM_CODEC, NetworkHandler::handleSortInventory);
@@ -81,29 +83,7 @@ public class NetworkHandler {
 
             List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, player.blockPosition(), payload.radius());
             for (ChestUtil.Storage storage : storages) {
-                ItemGrouping.Key assigned = data.getKey(storage.canonicalPos()).orElse(null);
-                String categoryName = assigned != null ? assigned.storageKey() : "UNASSIGNED";
-                // Flag suffix (never a real category name, so it can't collide with one) - lets
-                // the client show an [EXCLUDED] tag without changing the payload's wire format.
-                if (data.isExcluded(storage.canonicalPos())) {
-                    categoryName += "|EX";
-                }
-                ItemGrouping.Key autoKey = ChestSorter.detectDominantKey(storage.container(), grouping);
-
-                int itemCount = 0;
-                for (int i = 0; i < storage.container().getContainerSize(); i++) {
-                    itemCount += storage.container().getItem(i).getCount();
-                }
-                int free = ChestUtil.freeCapacityEstimate(storage.container());
-
-                String kindTag = switch (storage.kind()) {
-                    case CHEST -> "CHEST";
-                    case BARREL -> "BARREL";
-                    case MODDED -> "MODDED:" + storage.modId();
-                };
-
-                entries.add(new NearbyChestsResponsePayload.Entry(
-                        storage.canonicalPos(), categoryName, autoKey.storageKey(), itemCount, free, kindTag));
+                entries.add(toEntry(storage, data, grouping));
             }
 
             for (BlockPos enderPos : ChestUtil.findNearbyEnderChests(level, player.blockPosition(), payload.radius())) {
@@ -137,6 +117,7 @@ public class NetworkHandler {
             if (payload.categoryName().equals("AUTO")) {
                 data.clearCategory(pos);
                 player.sendSystemMessage(Component.literal("Chest category reset to auto-detect.").withStyle(ChatFormatting.GRAY));
+                pushSingleChestUpdate(player, level, pos, context);
                 return;
             }
 
@@ -145,6 +126,7 @@ public class NetworkHandler {
                 player.sendSystemMessage((nowExcluded
                         ? Component.literal("Chest excluded - Sort All Nearby and QuickStack will skip it.").withStyle(ChatFormatting.YELLOW)
                         : Component.literal("Chest re-included in auto-sort.").withStyle(ChatFormatting.GREEN)));
+                pushSingleChestUpdate(player, level, pos, context);
                 return;
             }
 
@@ -152,7 +134,49 @@ public class NetworkHandler {
             if (key == null) return;
             data.setKey(pos, key);
             player.sendSystemMessage(Component.literal("Chest set to category: " + key.displayName()).withStyle(ChatFormatting.GREEN));
+            pushSingleChestUpdate(player, level, pos, context);
         });
+    }
+
+    /** Builds one wire entry for a storage - shared by the full nearby-poll response and the
+     *  single-chest instant push sent right after a category change. */
+    private static NearbyChestsResponsePayload.Entry toEntry(ChestUtil.Storage storage, ChestCategoryData data, GroupingConfig.Settings grouping) {
+        ItemGrouping.Key assigned = data.getKey(storage.canonicalPos()).orElse(null);
+        String categoryName = assigned != null ? assigned.storageKey() : "UNASSIGNED";
+        if (data.isExcluded(storage.canonicalPos())) {
+            categoryName += "|EX";
+        }
+        ItemGrouping.Key autoKey = ChestSorter.detectDominantKey(storage.container(), grouping);
+
+        int itemCount = 0;
+        for (int i = 0; i < storage.container().getContainerSize(); i++) {
+            itemCount += storage.container().getItem(i).getCount();
+        }
+        int free = ChestUtil.freeCapacityEstimate(storage.container());
+
+        String kindTag = switch (storage.kind()) {
+            case CHEST -> "CHEST";
+            case BARREL -> "BARREL";
+            case MODDED -> "MODDED:" + storage.modId();
+        };
+
+        return new NearbyChestsResponsePayload.Entry(
+                storage.canonicalPos(), categoryName, autoKey.storageKey(), itemCount, free, kindTag);
+    }
+
+    /** Pushes the freshly-updated state for one chest straight back to the player who just
+     *  changed it, so the floating icon updates instantly instead of waiting for the next
+     *  ~5s background poll (see ChestCatClient.BACKGROUND_POLL_INTERVAL_TICKS). */
+    private static void pushSingleChestUpdate(ServerPlayer player, ServerLevel level, BlockPos canonicalPos,
+                                               net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        ChestCategoryData data = ChestCategoryData.get(level);
+        GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
+        for (ChestUtil.Storage storage : ChestUtil.findNearbyStorages(level, canonicalPos, 1)) {
+            if (storage.canonicalPos().equals(canonicalPos)) {
+                context.reply(new ChestCategoryUpdatePayload(toEntry(storage, data, grouping)));
+                return;
+            }
+        }
     }
 
     /** Parses "WOOD" or "WOOD:oak"; returns null for an unknown category or a sub-type that category can't split into. */
