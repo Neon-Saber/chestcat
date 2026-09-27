@@ -30,6 +30,7 @@ public class ChestCategoryData extends SavedData {
     private final Map<BlockPos, ItemGrouping.Key> categories = new HashMap<>();
     private final java.util.Set<BlockPos> excluded = new java.util.HashSet<>();
     private final java.util.Set<BlockPos> whitelisted = new java.util.HashSet<>();
+    private final java.util.Set<BlockPos> locked = new java.util.HashSet<>();
     /** When on, Sort Nearby and QuickStack only ever touch chests in {@link #whitelisted} -
      *  everything else is treated as excluded, regardless of the exclude set above. */
     private boolean whitelistMode = false;
@@ -94,6 +95,26 @@ public class ChestCategoryData extends SavedData {
         return nowWhitelisted;
     }
 
+    /**
+     * A locked chest is strict: Sort Nearby will only ever route items into it that
+     * genuinely match its assigned category (or sub-type), and - critically - it is
+     * never used as last-resort overflow for an unrelated leftover item just because it
+     * has empty slots. Unlocked (the default, for backward compatibility) behaves exactly
+     * as before: flexible, and eligible to soak up overflow when nothing else fits.
+     */
+    public boolean isLocked(BlockPos pos) {
+        return locked.contains(pos.immutable());
+    }
+
+    /** Flips the lock flag for this chest and returns the new state. */
+    public boolean toggleLocked(BlockPos pos) {
+        BlockPos key = pos.immutable();
+        boolean nowLocked = locked.add(key);
+        if (!nowLocked) locked.remove(key);
+        setDirty();
+        return nowLocked;
+    }
+
     public boolean isWhitelistMode() {
         return whitelistMode;
     }
@@ -138,6 +159,16 @@ public class ChestCategoryData extends SavedData {
         }
         tag.put("whitelisted", whitelistedList);
         tag.putBoolean("whitelistMode", whitelistMode);
+
+        ListTag lockedList = new ListTag();
+        for (BlockPos pos : locked) {
+            CompoundTag posTag = new CompoundTag();
+            posTag.putInt("x", pos.getX());
+            posTag.putInt("y", pos.getY());
+            posTag.putInt("z", pos.getZ());
+            lockedList.add(posTag);
+        }
+        tag.put("locked", lockedList);
         return tag;
     }
 
@@ -170,6 +201,12 @@ public class ChestCategoryData extends SavedData {
             data.whitelisted.add(new BlockPos(posTag.getInt("x"), posTag.getInt("y"), posTag.getInt("z")));
         }
         data.whitelistMode = tag.getBoolean("whitelistMode");
+
+        ListTag lockedList = tag.getList("locked", StringTag.TAG_COMPOUND);
+        for (int i = 0; i < lockedList.size(); i++) {
+            CompoundTag posTag = lockedList.getCompound(i);
+            data.locked.add(new BlockPos(posTag.getInt("x"), posTag.getInt("y"), posTag.getInt("z")));
+        }
         return data;
     }
 }

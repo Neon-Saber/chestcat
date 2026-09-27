@@ -1,6 +1,7 @@
 package net.chestcat;
 
 import net.chestcat.data.ChestCategoryData;
+import net.chestcat.data.ContainerRulesData;
 import net.chestcat.data.ProtectedItemsData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -8,6 +9,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
+import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.*;
@@ -18,10 +20,40 @@ public final class ChestSorter {
 
     public record Result(int itemsMoved, int itemsDropped, int chestsTouched) {}
 
+    /** One planned move a {@link #previewSortNearby} run would make: this many of this item,
+     *  landing in the chest at this position. Reported at item-type granularity (not a
+     *  slot-by-slot log) - when several source chests contribute the same item type to the
+     *  same destination, it's reported as one combined entry. */
+    public record PlannedMove(String item, int count, BlockPos destination) {}
+
+    /** Read-only result of {@link #previewSortNearby}: the moves it would make, how many
+     *  items would move, how many would have nowhere to go (and would be dropped if this
+     *  were a real sort), and how many chests are involved. Nothing is touched to produce this. */
+    public record Preview(List<PlannedMove> moves, int itemsWouldMove, int itemsWithNoDestination, int chestsInvolved) {}
+
     public static Result sortNearby(ServerPlayer player, int radius, ItemSortMode sortMode) {
+        return runSort(player, radius, sortMode, false, new ArrayList<>());
+    }
+
+    /**
+     * Calculates exactly what {@link #sortNearby} would do, without moving a single item,
+     * without persisting any newly auto-detected chest category, and without triggering the
+     * background AI classifier. The same routing method (rule chests, then exact key, then
+     * category, then MISC, then open overflow) runs against in-memory copies of the real
+     * chests, so the preview is never out of sync with the real algorithm.
+     */
+    public static Preview previewSortNearby(ServerPlayer player, int radius, ItemSortMode sortMode) {
+        List<PlannedMove> moves = new ArrayList<>();
+        Result r = runSort(player, radius, sortMode, true, moves);
+        return new Preview(moves, r.itemsMoved(), r.itemsDropped(), r.chestsTouched());
+    }
+
+    private static Result runSort(ServerPlayer player, int radius, ItemSortMode sortMode,
+                                   boolean dryRun, List<PlannedMove> movesOut) {
         ServerLevel level = player.serverLevel();
         BlockPos center = player.blockPosition();
         ChestCategoryData data = ChestCategoryData.get(level);
+        ContainerRulesData rulesData = ContainerRulesData.get(level);
         ProtectedItemsData protectedItems = ProtectedItemsData.get(level);
         SortLayoutPrefs.Settings layout = SortLayoutPrefs.get(player.getUUID());
         GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
@@ -39,27 +71,63 @@ public final class ChestSorter {
             return new Result(0, 0, 0);
         }
 
+        // A dry run never touches a real chest: work against an in-memory copy of each one.
+        // Everything below reads/writes through workingContainer, never storage.container()
+        // directly, so the exact same code path is correct for both a real sort and a preview.
+        Map<ChestUtil.Storage, Container> workingContainer = new LinkedHashMap<>();
+        Map<Container, BlockPos> posOf = new LinkedHashMap<>();
+        for (ChestUtil.Storage storage : storages) {
+            Container working;
+            if (dryRun) {
+                SimpleContainer clone = new SimpleContainer(storage.container().getContainerSize());
+                for (int i = 0; i < storage.container().getContainerSize(); i++) {
+                    clone.setItem(i, storage.container().getItem(i).copy());
+                }
+                working = clone;
+            } else {
+                working = storage.container();
+            }
+            workingContainer.put(storage, working);
+            posOf.put(working, storage.canonicalPos());
+        }
+
         // Each chest's key: its manual/locked-in assignment, else the dominant key of what's inside.
         Map<ChestUtil.Storage, ItemGrouping.Key> storageKey = new LinkedHashMap<>();
         for (ChestUtil.Storage storage : storages) {
             Optional<ItemGrouping.Key> assigned = data.getKey(storage.canonicalPos());
-            ItemGrouping.Key key = assigned.orElseGet(() -> detectDominantKey(storage.container(), grouping));
+            ItemGrouping.Key key = assigned.orElseGet(() -> detectDominantKey(workingContainer.get(storage), grouping));
             storageKey.put(storage, key);
-            if (assigned.isEmpty()) {
+            if (assigned.isEmpty() && !dryRun) {
                 data.setKey(storage.canonicalPos(), key);
             }
         }
 
         List<Container> allContainersInOrder = new ArrayList<>();
+        // Everything eligible for the last-resort "any container" overflow step - a rule chest
+        // or a locked chest is NEVER in here, since that's exactly the bug this fixes: an
+        // unrelated leftover item must not be able to land in a chest the player explicitly
+        // restricted, just because nothing else took it.
+        List<Container> openContainersInOrder = new ArrayList<>();
+        // Chests with a hand-written rule, in storage order, paired with that rule - checked
+        // per item before any category-based routing, since an explicit rule is more specific
+        // than an automatic category guess.
+        Map<Container, ContainerRule> containerRule = new LinkedHashMap<>();
+
         for (ChestUtil.Storage storage : storages) {
-            allContainersInOrder.add(storage.container());
+            Container working = workingContainer.get(storage);
+            allContainersInOrder.add(working);
+            Optional<ContainerRule> rule = rulesData.getRule(storage.canonicalPos());
+            rule.ifPresent(r -> containerRule.put(working, r));
+            if (!rulesData.isRestricted(storage.canonicalPos())) {
+                openContainersInOrder.add(working);
+            }
         }
 
         // Protected item types are left exactly where they are - never pulled into the
         // shared pool, so they can never be redistributed to a different chest.
         List<ItemStack> pool = new ArrayList<>();
         for (ChestUtil.Storage storage : storages) {
-            pool.addAll(ChestUtil.extractAll(storage.container(), protectedItems::isProtected));
+            pool.addAll(ChestUtil.extractAll(workingContainer.get(storage), protectedItems::isProtected));
         }
 
         // Identical stacks merge first, then everything is laid out in sort order, so the same items
@@ -67,8 +135,9 @@ public final class ChestSorter {
         pool = mergeStacks(pool);
         pool.sort(ItemSortUtils.comparator(sortMode, layout));
 
-        // Item types nothing could place (usually modded): ask the optional AI once, in the background.
-        if (AiClassifier.isEnabled()) {
+        // Item types nothing could place (usually modded): ask the optional AI once, in the
+        // background. Never during a preview - a preview must have zero side effects.
+        if (!dryRun && AiClassifier.isEnabled()) {
             Set<String> unknown = new LinkedHashSet<>();
             for (ItemStack stack : pool) {
                 if (unknown.size() < 150 && ItemGrouping.needsAi(stack)) unknown.add(ItemGrouping.itemId(stack));
@@ -81,10 +150,15 @@ public final class ChestSorter {
         }
 
         // Exact key (e.g. WOOD:oak, or plain WOOD) -> chests, plus every chest of a category regardless of sub-type.
+        // A rule chest is deliberately excluded from both maps: once a chest has an explicit
+        // rule, that rule is the ONLY way anything reaches it - it must not also keep
+        // receiving items through the normal category/key fallback chain.
         Map<ItemGrouping.Key, List<Container>> byKey = new HashMap<>();
         Map<ItemCategory, List<Container>> byCategory = new EnumMap<>(ItemCategory.class);
         for (Map.Entry<ChestUtil.Storage, ItemGrouping.Key> entry : storageKey.entrySet()) {
-            Container container = entry.getKey().container();
+            ChestUtil.Storage storage = entry.getKey();
+            if (rulesData.getRule(storage.canonicalPos()).isPresent()) continue;
+            Container container = workingContainer.get(storage);
             byKey.computeIfAbsent(entry.getValue(), k -> new ArrayList<>()).add(container);
             byCategory.computeIfAbsent(entry.getValue().category(), c -> new ArrayList<>()).add(container);
         }
@@ -94,29 +168,46 @@ public final class ChestSorter {
 
         for (ItemStack stack : pool) {
             int originalCount = stack.getCount();
+            String label = stack.getHoverName().getString();
             ItemGrouping.Key key = ItemGrouping.classify(stack, grouping);
             ItemGrouping.Key custom = ItemGrouping.customKey(stack);
 
-            // A chest pointed at this item's custom group wins; otherwise the normal category chain.
             ItemStack remaining = stack;
+
+            // A chest pointed at this item's custom group wins over everything else.
             if (custom != null) {
-                remaining = insertInto(remaining, byKey.get(custom));
+                remaining = insertInto(remaining, byKey.get(custom), posOf, movesOut, label);
             }
+
+            // Explicit per-chest rules next - more specific than any automatic category guess.
+            if (!remaining.isEmpty() && !containerRule.isEmpty()) {
+                List<Container> matchingRuleChests = new ArrayList<>();
+                for (Map.Entry<Container, ContainerRule> e : containerRule.entrySet()) {
+                    if (e.getValue().matches(remaining, grouping)) matchingRuleChests.add(e.getKey());
+                }
+                if (!matchingRuleChests.isEmpty()) {
+                    remaining = insertInto(remaining, matchingRuleChests, posOf, movesOut, label);
+                }
+            }
+
             // Most specific chest first, then progressively looser fallbacks.
             if (!remaining.isEmpty()) {
-                remaining = insertInto(remaining, byKey.get(key));
+                remaining = insertInto(remaining, byKey.get(key), posOf, movesOut, label);
             }
             if (!remaining.isEmpty() && key.subKey() != null) {
-                remaining = insertInto(remaining, byKey.get(new ItemGrouping.Key(key.category(), null)));
+                remaining = insertInto(remaining, byKey.get(new ItemGrouping.Key(key.category(), null)), posOf, movesOut, label);
             }
             if (!remaining.isEmpty()) {
-                remaining = insertInto(remaining, byCategory.get(key.category()));
+                remaining = insertInto(remaining, byCategory.get(key.category()), posOf, movesOut, label);
             }
             if (!remaining.isEmpty()) {
-                remaining = insertInto(remaining, byCategory.get(ItemCategory.MISC));
+                remaining = insertInto(remaining, byCategory.get(ItemCategory.MISC), posOf, movesOut, label);
             }
             if (!remaining.isEmpty()) {
-                remaining = insertInto(remaining, allContainersInOrder);
+                // Last resort - deliberately excludes rule chests and locked chests (see
+                // openContainersInOrder above). This is the actual fix for the "Tools-only
+                // chest quietly accepts a diamond because nothing else wanted it" bug.
+                remaining = insertInto(remaining, openContainersInOrder, posOf, movesOut, label);
             }
 
             int leftover = remaining.isEmpty() ? 0 : remaining.getCount();
@@ -124,7 +215,11 @@ public final class ChestSorter {
 
             if (!remaining.isEmpty()) {
                 dropped += leftover;
-                player.drop(remaining, false);
+                // Never drop a real item on the ground for a preview - remaining still wraps a
+                // real ItemStack even though it was extracted from a cloned container.
+                if (!dryRun) {
+                    player.drop(remaining, false);
+                }
             }
         }
 
@@ -154,12 +249,20 @@ public final class ChestSorter {
         return merged;
     }
 
-    private static ItemStack insertInto(ItemStack stack, List<Container> targets) {
+    /** Inserts as much of stack as possible across targets, in order. If movesOut is non-null,
+     *  records how much landed in each target that actually accepted some. */
+    private static ItemStack insertInto(ItemStack stack, List<Container> targets, Map<Container, BlockPos> posOf,
+                                         List<PlannedMove> movesOut, String label) {
         if (targets == null || targets.isEmpty() || stack.isEmpty()) return stack;
         ItemStack remaining = stack;
         for (Container target : targets) {
             if (remaining.isEmpty()) break;
+            int before = remaining.getCount();
             remaining = ChestUtil.insertStack(target, remaining);
+            int placed = before - (remaining.isEmpty() ? 0 : remaining.getCount());
+            if (placed > 0 && movesOut != null) {
+                movesOut.add(new PlannedMove(label, placed, posOf.get(target)));
+            }
         }
         return remaining;
     }
