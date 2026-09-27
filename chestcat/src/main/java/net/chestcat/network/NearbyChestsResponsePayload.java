@@ -16,11 +16,12 @@ public record NearbyChestsResponsePayload(List<Entry> chests) implements CustomP
      * anything that isn't vanilla storage - the client splits on ':' to group by mod.
      * autoCategoryName is the server's best guess at what's dominant in the container,
      * used by the client to sort/label chests that have no manual category assigned.
-     * excluded mirrors ChestCategoryData.isExcluded(pos) - always false for ender chests,
-     * which aren't individually excludable.
+     * Exclusion state is NOT a separate field - StreamCodec.composite tops out at 6
+     * fields, so it rides as a "|EX" suffix on categoryName instead (see NetworkHandler,
+     * which appends it, and NearbyChestsScreen/ClientChestCategoryCache, which strip it).
      */
     public record Entry(BlockPos pos, String categoryName, String autoCategoryName,
-                        int itemCount, int freeSlots, String kindTag, boolean excluded) {}
+                        int itemCount, int freeSlots, String kindTag) {}
 
     public static final Type<NearbyChestsResponsePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath("chestcat", "nearby_response"));
@@ -32,7 +33,6 @@ public record NearbyChestsResponsePayload(List<Entry> chests) implements CustomP
             ByteBufCodecs.VAR_INT, Entry::itemCount,
             ByteBufCodecs.VAR_INT, Entry::freeSlots,
             ByteBufCodecs.STRING_UTF8, Entry::kindTag,
-            ByteBufCodecs.BOOL, Entry::excluded,
             Entry::new
     );
 

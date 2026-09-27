@@ -198,7 +198,7 @@ public class NetworkHandler {
             if (!(context.player() instanceof ServerPlayer player)) return;
             if (player.containerMenu instanceof ChestMenu chestMenu) {
                 Container container = chestMenu.getSlot(0).container;
-                ChestSorter.sortContainer(container, payload.sortMode(), player.getUUID());
+                ChestSorter.sortContainer(container, payload.sortMode(), player);
             }
         });
     }

@@ -57,12 +57,19 @@ public class ClientChestCategoryCache {
         for (NearbyChestsResponsePayload.Entry e : chests) {
             if ("ENDER_CHEST".equals(e.kindTag())) continue;
 
+            // categoryName carries a "|EX" flag suffix for excluded chests (see NetworkHandler) -
+            // strip it before treating the rest as a plain storage key.
+            boolean excluded = e.categoryName().contains("|EX");
+            String baseCategoryName = excluded
+                    ? e.categoryName().substring(0, e.categoryName().indexOf('|'))
+                    : e.categoryName();
+
             ItemGrouping.Key key;
-            if (!"UNASSIGNED".equals(e.categoryName())) {
-                key = ItemGrouping.Key.parse(e.categoryName());
+            if (!"UNASSIGNED".equals(baseCategoryName)) {
+                key = ItemGrouping.Key.parse(baseCategoryName);
             } else if (e.itemCount() > 0) {
                 key = ItemGrouping.Key.parse(e.autoCategoryName());
-            } else if (e.excluded()) {
+            } else if (excluded) {
                 // Unassigned and empty, but excluded - still worth caching so the C menu and
                 // nearby list show its excluded state correctly; the indicator renderer skips
                 // excluded chests regardless of which key ends up here.
@@ -73,7 +80,7 @@ public class ClientChestCategoryCache {
 
             BlockPos pos = e.pos().immutable();
             seen.add(pos);
-            CACHE.put(pos, new Entry(key, now, e.excluded()));
+            CACHE.put(pos, new Entry(key, now, excluded));
         }
 
         CACHE.entrySet().removeIf(entry -> {
