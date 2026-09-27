@@ -77,7 +77,8 @@ public class NetworkHandler {
                 };
 
                 entries.add(new NearbyChestsResponsePayload.Entry(
-                        storage.canonicalPos(), categoryName, autoKey.storageKey(), itemCount, free, kindTag));
+                        storage.canonicalPos(), categoryName, autoKey.storageKey(), itemCount, free, kindTag,
+                        data.isExcluded(storage.canonicalPos())));
             }
 
             for (BlockPos enderPos : ChestUtil.findNearbyEnderChests(level, player.blockPosition(), payload.radius())) {
@@ -89,7 +90,7 @@ public class NetworkHandler {
                     if (stack.isEmpty()) free++; else itemCount += stack.getCount();
                 }
                 entries.add(new NearbyChestsResponsePayload.Entry(
-                        enderPos, "UNASSIGNED", "MISC", itemCount, free, "ENDER_CHEST"));
+                        enderPos, "UNASSIGNED", "MISC", itemCount, free, "ENDER_CHEST", false));
             }
 
             context.reply(new NearbyChestsResponsePayload(entries));

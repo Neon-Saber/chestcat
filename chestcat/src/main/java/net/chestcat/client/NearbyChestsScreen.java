@@ -192,6 +192,9 @@ public class NearbyChestsScreen extends Screen {
                 int rowPad = 2;
                 int rowBg = hovering ? 0x40FFFFFF : (index % 2 == 0 ? 0x1AFFFFFF : 0x00000000);
                 graphics.fill(left + 2, top + rowPad, left + width - 2, top + height - rowPad, rowBg);
+                if (data.excluded()) {
+                    graphics.fill(left + 2, top + rowPad, left + width - 2, top + height - rowPad, 0x30FF4444);
+                }
 
                 int badgeSize = 16;
                 int badgeY = top + (height - badgeSize) / 2;
@@ -208,6 +211,7 @@ public class NearbyChestsScreen extends Screen {
                         : ("UNASSIGNED".equals(data.categoryName())
                                 ? prettyName(data.autoCategoryName())
                                 : prettyName(data.categoryName()));
+                if (data.excluded()) categoryLabel += "  [EXCLUDED]";
 
                 int locateWidth = NearbyChestsScreen.this.font.width("Locate") + 10;
                 int locateX = left + width - locateWidth - 6;

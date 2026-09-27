@@ -24,7 +24,7 @@ import java.util.Set;
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
 public class ClientChestCategoryCache {
 
-    public record Entry(ItemGrouping.Key key, long lastSeenMs) {}
+    public record Entry(ItemGrouping.Key key, long lastSeenMs, boolean excluded) {}
 
     /** Entries not refreshed for this long are treated as gone (the poll runs every ~5 seconds). */
     public static final long EXPIRE_MS = 30_000L;
@@ -40,6 +40,16 @@ public class ClientChestCategoryCache {
         return CACHE;
     }
 
+    /**
+     * Best-effort exclusion lookup for UI labels (e.g. the C menu's toggle button). Only reflects
+     * what the last nearby-chests poll saw - it's a label hint, not authoritative; the server's
+     * toggle response chat message is the source of truth for what actually changed.
+     */
+    public static boolean isExcluded(BlockPos pos) {
+        Entry e = CACHE.get(pos.immutable());
+        return e != null && e.excluded();
+    }
+
     public static void update(List<NearbyChestsResponsePayload.Entry> chests, BlockPos playerPos) {
         long now = System.currentTimeMillis();
         Set<BlockPos> seen = new HashSet<>();
@@ -52,13 +62,18 @@ public class ClientChestCategoryCache {
                 key = ItemGrouping.Key.parse(e.categoryName());
             } else if (e.itemCount() > 0) {
                 key = ItemGrouping.Key.parse(e.autoCategoryName());
+            } else if (e.excluded()) {
+                // Unassigned and empty, but excluded - still worth caching so the C menu and
+                // nearby list show its excluded state correctly; the indicator renderer skips
+                // excluded chests regardless of which key ends up here.
+                key = ItemGrouping.Key.parse(e.autoCategoryName());
             } else {
-                continue; // unassigned and empty: nothing meaningful to show
+                continue; // unassigned, empty, and not excluded: nothing meaningful to show
             }
 
             BlockPos pos = e.pos().immutable();
             seen.add(pos);
-            CACHE.put(pos, new Entry(key, now));
+            CACHE.put(pos, new Entry(key, now, e.excluded()));
         }
 
         CACHE.entrySet().removeIf(entry -> {
