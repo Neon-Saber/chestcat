@@ -28,6 +28,7 @@ public final class QuickStack {
         BlockPos center = player.blockPosition();
         Set<Integer> locked = LockedSlots.get(player.getUUID());
         Inventory inv = player.getInventory();
+        net.chestcat.data.ChestCategoryData data = net.chestcat.data.ChestCategoryData.get(level);
         int moved = 0;
 
         for (BlockPos pos : BlockPos.betweenClosed(
@@ -35,6 +36,7 @@ public final class QuickStack {
                 center.offset(RADIUS, RADIUS, RADIUS))) {
             BlockEntity be = level.getBlockEntity(pos);
             if (!(be instanceof Container container) || !ChestUtil.isStorage(level, pos, be)) continue;
+            if (data.isExcluded(ChestUtil.canonicalChestPos(level, pos))) continue;
 
             for (int i = MAIN_START; i < MAIN_END; i++) {
                 if (locked.contains(i)) continue;

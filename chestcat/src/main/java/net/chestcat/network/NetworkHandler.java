@@ -114,6 +114,14 @@ public class NetworkHandler {
                 return;
             }
 
+            if (payload.categoryName().equals("EXCLUDED")) {
+                boolean nowExcluded = data.toggleExcluded(pos);
+                player.sendSystemMessage((nowExcluded
+                        ? Component.literal("Chest excluded - Sort All Nearby and QuickStack will skip it.").withStyle(ChatFormatting.YELLOW)
+                        : Component.literal("Chest re-included in auto-sort.").withStyle(ChatFormatting.GREEN)));
+                return;
+            }
+
             ItemGrouping.Key key = parseAssignableKey(payload.categoryName());
             if (key == null) return;
             data.setKey(pos, key);

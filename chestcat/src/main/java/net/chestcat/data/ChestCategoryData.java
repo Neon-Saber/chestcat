@@ -28,6 +28,7 @@ public class ChestCategoryData extends SavedData {
     private static final String DATA_NAME = "chestcat_categories";
 
     private final Map<BlockPos, ItemGrouping.Key> categories = new HashMap<>();
+    private final java.util.Set<BlockPos> excluded = new java.util.HashSet<>();
 
     public static ChestCategoryData get(ServerLevel level) {
         DimensionDataStorage storage = level.getDataStorage();
@@ -60,6 +61,21 @@ public class ChestCategoryData extends SavedData {
         }
     }
 
+    /** Excluded chests are skipped by every bulk auto-sort operation (Sort All Nearby,
+     * QuickStack), but a player can still open and use them completely normally. */
+    public boolean isExcluded(BlockPos pos) {
+        return excluded.contains(pos.immutable());
+    }
+
+    /** Flips the exclusion flag for this chest and returns the new state. */
+    public boolean toggleExcluded(BlockPos pos) {
+        BlockPos key = pos.immutable();
+        boolean nowExcluded = excluded.add(key);
+        if (!nowExcluded) excluded.remove(key);
+        setDirty();
+        return nowExcluded;
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, net.minecraft.core.HolderLookup.Provider registries) {
         ListTag list = new ListTag();
@@ -72,6 +88,16 @@ public class ChestCategoryData extends SavedData {
             list.add(entryTag);
         }
         tag.put("entries", list);
+
+        ListTag excludedList = new ListTag();
+        for (BlockPos pos : excluded) {
+            CompoundTag posTag = new CompoundTag();
+            posTag.putInt("x", pos.getX());
+            posTag.putInt("y", pos.getY());
+            posTag.putInt("z", pos.getZ());
+            excludedList.add(posTag);
+        }
+        tag.put("excluded", excludedList);
         return tag;
     }
 
@@ -90,6 +116,12 @@ public class ChestCategoryData extends SavedData {
             } catch (IllegalArgumentException ignored) {
                 // Stored category name no longer exists (e.g. mod updated); skip it.
             }
+        }
+
+        ListTag excludedList = tag.getList("excluded", StringTag.TAG_COMPOUND);
+        for (int i = 0; i < excludedList.size(); i++) {
+            CompoundTag posTag = excludedList.getCompound(i);
+            data.excluded.add(new BlockPos(posTag.getInt("x"), posTag.getInt("y"), posTag.getInt("z")));
         }
         return data;
     }

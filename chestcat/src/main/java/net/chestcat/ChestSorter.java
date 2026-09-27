@@ -26,6 +26,7 @@ public final class ChestSorter {
         CustomGroups.refresh();
 
         List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, center, radius);
+        storages.removeIf(storage -> data.isExcluded(storage.canonicalPos()));
         if (storages.isEmpty()) {
             return new Result(0, 0, 0);
         }
@@ -64,7 +65,7 @@ public final class ChestSorter {
             }
             if (!unknown.isEmpty() && AiClassifier.classifyAsync(unknown, player)) {
                 player.sendSystemMessage(Component.literal("ChestCat AI is classifying " + unknown.size()
-                        + " unknown item type(s) in the background - sort again in a few seconds.")
+                                + " unknown item type(s) in the background - sort again in a few seconds.")
                         .withStyle(ChatFormatting.AQUA));
             }
         }
