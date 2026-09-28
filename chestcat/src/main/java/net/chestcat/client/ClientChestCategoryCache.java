@@ -55,7 +55,7 @@ public class ClientChestCategoryCache {
     public static void updateOne(NearbyChestsResponsePayload.Entry e) {
         if ("ENDER_CHEST".equals(e.kindTag())) return;
         boolean excluded = e.categoryName().contains("|EX");
-        String baseCategoryName = excluded ? e.categoryName().substring(0, e.categoryName().indexOf(':')) : e.categoryName();
+        String baseCategoryName = excluded ? e.categoryName().substring(0, e.categoryName().indexOf('|')) : e.categoryName();
 
         ItemGrouping.Key key;
         if (!"UNASSIGNED".equals(baseCategoryName)) {

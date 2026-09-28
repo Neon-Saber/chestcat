@@ -85,21 +85,11 @@ public final class ChestUtil {
                 if (visited.contains(canonical)) continue;
                 visited.add(pos);
                 visited.add(canonical);
-                // Mark the connected half visited too, if any - and remember it, so a
-                // just-formed double chest can carry over the non-canonical half's stale
-                // per-chest data (category/exclude/whitelist/lock) instead of losing it.
-                BlockPos connectedOther = null;
-                for (net.minecraft.core.Direction dir : new net.minecraft.core.Direction[]{
-                        net.minecraft.core.Direction.NORTH, net.minecraft.core.Direction.SOUTH,
-                        net.minecraft.core.Direction.EAST, net.minecraft.core.Direction.WEST}) {
-                    BlockPos neighbor = pos.relative(dir);
-                    if (level.getBlockEntity(neighbor) instanceof ChestBlockEntity
-                            && level.getBlockState(neighbor).getBlock() == state.getBlock()) {
-                        visited.add(neighbor);
-                        connectedOther = neighbor;
-                    }
-                }
-                BlockPos nonCanonical = pos.equals(canonical) ? connectedOther : pos;
+                // Only the chest's REAL paired half (by TYPE/FACING) counts - two separate single
+                // chests sitting side by side are NOT a double chest.
+                BlockPos connectedOther = connectedHalf(level, pos);
+                if (connectedOther != null) visited.add(connectedOther);
+                BlockPos nonCanonical = connectedOther == null ? null : (pos.equals(canonical) ? connectedOther : pos);
                 if (nonCanonical != null && !nonCanonical.equals(canonical)) {
                     net.chestcat.data.ChestCategoryData.get(level).migrateDoubleChest(canonical, nonCanonical.immutable());
                 }
@@ -146,18 +136,31 @@ public final class ChestUtil {
      * single chest too: it just returns pos back.
      */
     public static BlockPos canonicalChestPos(Level level, BlockPos pos) {
-        // Use whichever half sorts lower on X then Z as the canonical position,
-        // so both halves of a double chest always resolve to the same key.
-        BlockState state = level.getBlockState(pos);
-        for (net.minecraft.core.Direction dir : new net.minecraft.core.Direction[]{
-                net.minecraft.core.Direction.NORTH, net.minecraft.core.Direction.WEST}) {
-            BlockPos neighbor = pos.relative(dir);
-            if (level.getBlockEntity(neighbor) instanceof ChestBlockEntity
-                    && level.getBlockState(neighbor).getBlock() == state.getBlock()) {
-                return neighbor.immutable();
-            }
+        BlockPos other = connectedHalf(level, pos);
+        if (other != null && (other.getX() < pos.getX()
+                || (other.getX() == pos.getX() && other.getZ() < pos.getZ()))) {
+            return other.immutable();
         }
         return pos.immutable();
+    }
+
+    /**
+     * The other half of a double chest, or null for a single chest. Uses the blockstate's
+     * TYPE/FACING (the same data vanilla uses), so adjacent single chests never get paired.
+     */
+    public static BlockPos connectedHalf(net.minecraft.world.level.BlockGetter level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        if (!(state.getBlock() instanceof ChestBlock)
+                || !state.hasProperty(ChestBlock.TYPE) || !state.hasProperty(ChestBlock.FACING)) return null;
+        if (state.getValue(ChestBlock.TYPE) == net.minecraft.world.level.block.state.properties.ChestType.SINGLE) return null;
+        BlockPos other = pos.relative(ChestBlock.getConnectedDirection(state));
+        BlockState os = level.getBlockState(other);
+        if (os.getBlock() == state.getBlock() && os.hasProperty(ChestBlock.TYPE)
+                && os.getValue(ChestBlock.TYPE) != net.minecraft.world.level.block.state.properties.ChestType.SINGLE
+                && os.getValue(ChestBlock.FACING) == state.getValue(ChestBlock.FACING)) {
+            return other.immutable();
+        }
+        return null;
     }
 
     /** Removes and returns copies of every non-empty stack in the container, then clears it. */

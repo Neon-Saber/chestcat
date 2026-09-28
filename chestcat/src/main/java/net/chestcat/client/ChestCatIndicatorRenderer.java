@@ -70,6 +70,7 @@ public class ChestCatIndicatorRenderer {
             ClientChestCategoryCache.Entry data = entry.getValue();
             if (now - data.lastSeenMs() > ClientChestCategoryCache.EXPIRE_MS) continue;
 
+            if (data.excluded()) continue; // excluded chests show no icon
             if (level.getBlockEntity(pos) == null) continue; // broken, or not loaded on the client
 
             // Double chests: split between both halves instead of sitting off to one side.

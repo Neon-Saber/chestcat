@@ -1,5 +1,6 @@
 package net.chestcat.client;
 
+import net.chestcat.ChestUtil;
 import net.chestcat.ItemSortMode;
 import net.chestcat.network.NetworkHandler;
 import net.chestcat.network.RequestNearbyChestsPayload;
@@ -82,16 +83,9 @@ public class ChestCatClient {
     private static AABB wholeChestBox(BlockPos pos) {
         Minecraft mc = Minecraft.getInstance();
         AABB box = new AABB(pos);
-        if (mc.level == null || !(mc.level.getBlockEntity(pos) instanceof ChestBlockEntity)) return box;
-        var block = mc.level.getBlockState(pos).getBlock();
-        for (Direction dir : new Direction[]{Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
-            BlockPos neighbor = pos.relative(dir);
-            if (mc.level.getBlockEntity(neighbor) instanceof ChestBlockEntity
-                    && mc.level.getBlockState(neighbor).getBlock() == block) {
-                return box.minmax(new AABB(neighbor));
-            }
-        }
-        return box;
+        if (mc.level == null) return box;
+        BlockPos other = ChestUtil.connectedHalf(mc.level, pos);
+        return other == null ? box : box.minmax(new AABB(other));
     }
 
     @SubscribeEvent
