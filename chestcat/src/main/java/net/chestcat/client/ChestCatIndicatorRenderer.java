@@ -82,6 +82,10 @@ public class ChestCatIndicatorRenderer {
             double bob = Math.sin(now / 500.0 + pos.getX() * 0.7 + pos.getZ() * 1.3) * 0.04;
 
             pose.pushPose();
+            // 1.21 hands us an identity PoseStack and keeps the camera rotation in the model-view
+            // matrix; at AFTER_LEVEL the GL stack has already been popped, so fold it in here or
+            // the icons are drawn in view space and float around detached from the chests.
+            pose.mulPose(event.getModelViewMatrix());
             pose.translate(dx, dy + HEIGHT_ABOVE_BLOCK + bob, dz);
             pose.mulPose(Axis.YP.rotationDegrees(spin));
             pose.scale(ICON_SCALE, ICON_SCALE, ICON_SCALE);
