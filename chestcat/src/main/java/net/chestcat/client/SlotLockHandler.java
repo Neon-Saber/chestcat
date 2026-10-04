@@ -206,7 +206,7 @@ public class SlotLockHandler {
         if (!ClientUi.sounds || ClientUi.soundVolume <= 0) return;
         float volume = ClientUi.soundVolume / 100.0F;
         Minecraft.getInstance().getSoundManager().play(
-                SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, on ? 1.5F : 0.8F, volume));
+                SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK.value(), on ? 1.5F : 0.8F, volume));
     }
 
     // ----------------------------------------------------------------- render
