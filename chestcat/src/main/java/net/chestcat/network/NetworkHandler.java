@@ -5,7 +5,13 @@ import net.chestcat.ChestUtil;
 import net.chestcat.CustomGroups;
 import net.chestcat.GroupingConfig;
 import net.chestcat.InventorySorter;
+import net.chestcat.ExclusionRules;
 import net.chestcat.ItemCategory;
+import net.chestcat.PlayerSyncEvents;
+import net.chestcat.SortChain;
+import net.chestcat.MenuSorting;
+import net.chestcat.SortMore;
+import net.chestcat.data.FavoritesData;
 import net.chestcat.ItemGrouping;
 import net.chestcat.SortLayoutPrefs;
 import net.chestcat.data.ChestCategoryData;
@@ -18,6 +24,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ChestMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -56,6 +63,19 @@ public class NetworkHandler {
 
         // Item-level exclusions ("protected items") - client -> server toggle.
         registrar.playToServer(ToggleProtectedItemPayload.TYPE, ToggleProtectedItemPayload.STREAM_CODEC, NetworkHandler::handleToggleProtectedItem);
+
+        // Item-based favorites, sort chain extras, and server -> client syncs.
+        registrar.playToServer(ToggleFavoritePayload.TYPE, ToggleFavoritePayload.STREAM_CODEC, NetworkHandler::handleToggleFavorite);
+        registrar.playToServer(SetSortExtrasPayload.TYPE, SetSortExtrasPayload.STREAM_CODEC, NetworkHandler::handleSetSortExtras);
+        registrar.playToServer(SetSortMorePayload.TYPE, SetSortMorePayload.STREAM_CODEC, NetworkHandler::handleSetSortMore);
+        registrar.playToClient(ApplyProfileMorePayload.TYPE, ApplyProfileMorePayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleApplyProfileMore(payload));
+        registrar.playToClient(FavoritesSyncPayload.TYPE, FavoritesSyncPayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleFavoritesSync(payload));
+        registrar.playToClient(SlotLocksSyncPayload.TYPE, SlotLocksSyncPayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleSlotLocksSync(payload));
+        registrar.playToClient(ApplyProfileExtrasPayload.TYPE, ApplyProfileExtrasPayload.STREAM_CODEC,
+                (payload, context) -> net.chestcat.client.ClientPacketHandlers.handleApplyProfileExtras(payload));
 
         // Sort profiles - client -> server requests, server -> client responses/applies.
         registrar.playToServer(SaveSortProfilePayload.TYPE, SaveSortProfilePayload.STREAM_CODEC, NetworkHandler::handleSaveSortProfile);
@@ -212,17 +232,46 @@ public class NetworkHandler {
     private static void handleSortInventory(SortInventoryPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            int count = InventorySorter.sortMainInventory(player, payload.sortMode());
-            player.sendSystemMessage(Component.literal("Inventory sorted (" + count + " stacks).").withStyle(ChatFormatting.GREEN));
+            int changed = InventorySorter.sortMainInventory(player, payload.sortMode());
+            if (payload.quiet()) return;
+            player.displayClientMessage(changed == 0
+                    ? Component.literal("Inventory already sorted.").withStyle(ChatFormatting.GRAY)
+                    : Component.literal("Inventory sorted (" + changed + " slots rearranged).").withStyle(ChatFormatting.GREEN), true);
         });
     }
 
     private static void handleSortOpenContainer(SortOpenContainerPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            if (player.containerMenu instanceof ChestMenu chestMenu) {
+            AbstractContainerMenu menu = player.containerMenu;
+            if (menu == null || menu == player.inventoryMenu) return;
+
+            // "menu:" ignore rules: a whole container type the player never wants sorted.
+            String menuId = MenuSorting.menuId(menu);
+            SortLayoutPrefs.Settings prefs = SortLayoutPrefs.get(player.getUUID());
+            if (ExclusionRules.parse(prefs.exclusions()).matchesMenu(menuId)) {
+                if (!payload.quiet()) {
+                    player.displayClientMessage(Component.literal("This container type is on your ignore list.")
+                            .withStyle(ChatFormatting.YELLOW), true);
+                }
+                return;
+            }
+
+            int changed;
+            if (menu instanceof ChestMenu chestMenu) {
                 Container container = chestMenu.getSlot(0).container;
-                ChestSorter.sortContainer(container, payload.sortMode(), player);
+                changed = ChestSorter.sortContainer(container, payload.sortMode(), player);
+            } else {
+                // Shulker boxes, hoppers, dispensers and modded storage: any menu whose non-player slots all
+                // take ordinary items is sorted through its slots, so no per-mod support is needed.
+                java.util.List<net.minecraft.world.inventory.Slot> slots = MenuSorting.storageSlots(menu, player);
+                if (slots.isEmpty()) return;
+                changed = ChestSorter.sortContainer(MenuSorting.view(slots), payload.sortMode(), player);
+            }
+            if (!payload.quiet()) {
+                player.displayClientMessage(changed == 0
+                        ? Component.literal("Container already sorted.").withStyle(ChatFormatting.GRAY)
+                        : Component.literal("Container sorted (" + changed + " slots rearranged).").withStyle(ChatFormatting.GREEN), true);
             }
         });
     }
@@ -232,6 +281,44 @@ public class NetworkHandler {
             if (!(context.player() instanceof ServerPlayer player)) return;
             // Persisted (survives restarts) - replaces the old session-only net.chestcat.LockedSlots.
             LockedSlotsData.get(player.serverLevel()).toggle(player.getUUID(), payload.slotIndex());
+            PlayerSyncEvents.sendLocks(player);
+        });
+    }
+
+    private static void handleToggleFavorite(ToggleFavoritePayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            List<net.minecraft.world.inventory.Slot> slots = player.containerMenu.slots;
+            int idx = payload.menuSlot();
+            if (idx < 0 || idx >= slots.size()) return;
+            ItemStack stack = slots.get(idx).getItem();
+            if (stack.isEmpty()) return;
+            FavoritesData.get(player.serverLevel()).toggle(player.getUUID(), stack);
+            // Always answer with the full list so the client can never drift from the server.
+            PlayerSyncEvents.sendFavorites(player);
+        });
+    }
+
+    private static void handleSetSortExtras(SetSortExtrasPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            SortLayoutPrefs.set(player.getUUID(), SortLayoutPrefs.get(player.getUUID()).withExtras(
+                    SortChain.parse(payload.chain()).serialize(),
+                    payload.favoriteMode(),
+                    payload.mergeStacks(),
+                    ExclusionRules.normalize(payload.exclusions())));
+        });
+    }
+
+    private static void handleSetSortMore(SetSortMorePayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            SortMore m = payload.more();
+            // Re-clean on the server: never trust the wire for the free-text order lists.
+            SortMore clean = new SortMore(m.emptySlots(), m.hotbarSeparate(), m.hotbarFavoritesStay(),
+                    m.preserveSelected(), SortMore.cleanCategoryOrder(m.categoryOrder()),
+                    SortMore.cleanModOrder(m.modOrder()), m.alphaDescending());
+            SortLayoutPrefs.set(player.getUUID(), SortLayoutPrefs.get(player.getUUID()).withMore(clean));
         });
     }
 
@@ -252,7 +339,8 @@ public class NetworkHandler {
     private static void handleToggleColumnFill(SetSortLayoutPayload payload, net.neoforged.neoforge.network.handling.IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
-            SortLayoutPrefs.set(player.getUUID(), new SortLayoutPrefs.Settings(
+            // Keep the chain / favorite mode / exclusions the player already sent - this packet only carries layout options.
+            SortLayoutPrefs.set(player.getUUID(), SortLayoutPrefs.get(player.getUUID()).withLayout(
                     payload.layout(), payload.reverse(), payload.includeHotbar(),
                     payload.groupArmorBySlot(), payload.tiebreakPriority(), payload.floatEnchantedFirst()));
         });
@@ -314,6 +402,8 @@ public class NetworkHandler {
                 context.reply(new ApplyProfileModesPayload(profile.inventoryMode(), profile.chestMode(), profile.nearbyMode()));
                 context.reply(ApplyProfileLayoutPayload.of(profile.layout()));
                 context.reply(ApplyProfileGroupingPayload.of(profile.grouping()));
+                context.reply(ApplyProfileExtrasPayload.of(profile.layout()));
+                context.reply(new ApplyProfileMorePayload(profile.layout().more()));
 
                 player.sendSystemMessage(Component.literal("Loaded sort profile \"" + payload.name() + "\".").withStyle(ChatFormatting.GREEN));
             }, () -> player.sendSystemMessage(Component.literal("No such profile: \"" + payload.name() + "\".").withStyle(ChatFormatting.RED)));

@@ -1,7 +1,6 @@
 package net.chestcat;
 
 import net.chestcat.data.LockedSlotsData;
-import net.chestcat.data.ProtectedItemsData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -31,7 +30,7 @@ public final class QuickStack {
         Set<Integer> locked = LockedSlotsData.get(player.serverLevel()).get(player.getUUID());
         Inventory inv = player.getInventory();
         net.chestcat.data.ChestCategoryData data = net.chestcat.data.ChestCategoryData.get(level);
-        ProtectedItemsData protectedItems = ProtectedItemsData.get(level);
+        java.util.function.Predicate<net.minecraft.world.item.ItemStack> skipStack = FavoriteRules.skipForTransfer(player);
         int moved = 0;
 
         for (BlockPos pos : BlockPos.betweenClosed(
@@ -46,7 +45,7 @@ public final class QuickStack {
             for (int i = MAIN_START; i < MAIN_END; i++) {
                 if (locked.contains(i)) continue;
                 ItemStack stack = inv.getItem(i);
-                if (stack.isEmpty() || protectedItems.isProtected(stack) || !containerHasMatching(container, stack)) continue;
+                if (stack.isEmpty() || skipStack.test(stack) || !containerHasMatching(container, stack)) continue;
 
                 int remaining = stack.getCount();
                 for (int c = 0; c < container.getContainerSize() && remaining > 0; c++) {

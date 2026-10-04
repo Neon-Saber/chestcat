@@ -33,6 +33,14 @@ public final class SortGrid {
         return order;
     }
 
+    /**
+     * Index into the fill order where the first item goes. Normally 0 (items first, empty slots after them);
+     * with "empty slots first" the items are pushed to the end so the empty slots come before them.
+     */
+    public static int startIndex(int orderSize, int itemCount, boolean emptyFirst) {
+        return emptyFirst ? Math.max(0, orderSize - itemCount) : 0;
+    }
+
     private static void add(List<Integer> order, int slot) {
         if (slot >= 0) order.add(slot);
     }

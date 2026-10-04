@@ -25,21 +25,34 @@ public class SortModePickerScreen extends Screen {
 
     @Override
     protected void init() {
-        int y = this.height / 2 - (ItemSortMode.values().length * 22) / 2;
-        for (ItemSortMode mode : ItemSortMode.values()) {
-            int fy = y;
+        ItemSortMode[] modes = ItemSortMode.values();
+        int n = modes.length;
+
+        // Flow into as many columns as the screen height needs, so the list never runs off a small GUI.
+        int perCol = Math.max(4, Math.min(n, (this.height - 50) / 22));
+        int cols = (n + perCol - 1) / perCol;
+        int colW = 190;
+        int gap = 6;
+        int totalW = cols * colW + (cols - 1) * gap;
+        int x0 = this.width / 2 - totalW / 2;
+        int rows = Math.min(n, perCol);
+        int y0 = Math.max(6, this.height / 2 - (rows * 22 + 28) / 2);
+
+        for (int i = 0; i < n; i++) {
+            ItemSortMode mode = modes[i];
+            int col = i / perCol;
+            int row = i % perCol;
             this.addRenderableWidget(Button.builder(Component.literal(mode.getDisplayName()),
                             b -> {
                                 onPicked.accept(mode);
                                 this.minecraft.setScreen(parent);
                             })
-                    .bounds(this.width / 2 - 100, fy, 200, 20)
+                    .bounds(x0 + col * (colW + gap), y0 + row * 22, colW, 20)
                     .build());
-            y += 22;
         }
         this.addRenderableWidget(Button.builder(Component.literal("Cancel"),
                         b -> this.minecraft.setScreen(parent))
-                .bounds(this.width / 2 - 100, y + 6, 200, 20)
+                .bounds(this.width / 2 - 100, y0 + rows * 22 + 6, 200, 20)
                 .build());
     }
 

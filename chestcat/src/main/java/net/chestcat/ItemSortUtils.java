@@ -40,24 +40,46 @@ public final class ItemSortUtils {
     }
 
     public static Comparator<ItemStack> comparator(ItemSortMode mode, SortLayoutPrefs.Settings settings) {
-        Comparator<ItemStack> tie = tiebreak(settings);
+        return comparator(mode, settings, null);
+    }
+
+    /**
+     * The context for one player's sort: their custom category / mod order and name direction, plus (when a
+     * player is known) their usage history and favorites for the usage / favorites keys.
+     */
+    public static SortContext contextFor(SortLayoutPrefs.Settings settings, net.minecraft.server.level.ServerPlayer player) {
+        if (player == null) return SortContext.of(settings.more(), null, null);
+        net.chestcat.data.UsageData usage = net.chestcat.data.UsageData.get(player.serverLevel());
+        return SortContext.of(settings.more(), usage.view(player.getUUID()), FavoriteRules.favoritePredicate(player));
+    }
+
+    public static Comparator<ItemStack> comparator(ItemSortMode mode, SortLayoutPrefs.Settings settings,
+                                                   net.minecraft.server.level.ServerPlayer player) {
+        SortContext ctx = contextFor(settings, player);
+        Comparator<ItemStack> tie = tiebreak(settings, ctx);
+        Comparator<ItemStack> name = ctx.nameComparator();
         return switch (mode) {
-            case ALPHABETICAL -> byName().thenComparing(tie);
+            case ALPHABETICAL -> name.thenComparing(tie);
             case COUNT_DESC -> Comparator.comparingInt(ItemStack::getCount).reversed().thenComparing(tie);
             case COUNT_ASC -> Comparator.comparingInt(ItemStack::getCount).thenComparing(tie);
-            case MOD_ID -> Comparator.comparing(ItemSortUtils::modId).thenComparing(tie);
-            case MOD_THEN_TYPE -> Comparator.comparing(ItemSortUtils::modId)
+            case MOD_ID -> ctx.modComparator().thenComparing(tie);
+            case MOD_THEN_TYPE -> ctx.modComparator()
                     .thenComparingInt(ItemSortUtils::typeRank)
                     .thenComparing(tie);
             case REGISTRY_ORDER -> Comparator.comparingInt(ItemSortUtils::registryId).thenComparing(tie);
             case CREATIVE_ORDER -> Comparator.<ItemStack>comparingInt(s -> CreativeOrder.getOrder(s.getItem()))
                     .thenComparingInt(ItemSortUtils::registryId)
-                    .thenComparing(byName())
+                    .thenComparing(name)
                     .thenComparing(Comparator.comparingInt(ItemStack::getCount).reversed());
             case ITEM_TYPE -> Comparator.comparingInt(ItemSortUtils::typeRank).thenComparing(tie);
             case MATERIAL -> Comparator.comparingInt(ItemSortUtils::materialRank).thenComparing(tie);
             case COLOR -> Comparator.comparingInt(ItemSortUtils::colorRank).thenComparing(tie);
-            case SMART -> smartComparator(settings);
+            case SMART -> smartComparator(settings, ctx);
+            case CATEGORY_MOD -> SortChain.parse("category:asc,mod:asc,name:asc").comparator(ctx);
+            case MOD_CATEGORY -> SortChain.parse("mod:asc,category:asc,name:asc").comparator(ctx);
+            case RARITY -> SortChain.parse("rarity:desc,category:asc,mod:asc,name:asc").comparator(ctx);
+            case DURABILITY -> SortChain.parse("category:asc,durability_left:desc,material:desc,name:asc").comparator(ctx);
+            case CUSTOM -> SortChain.parse(settings.chain()).comparator(ctx);
         };
     }
 
@@ -67,12 +89,12 @@ public final class ItemSortUtils {
      * priority order), then name. "groupArmorBySlot" and "tiebreakPriority" are the
      * two customization knobs exposed in Sort Options.
      */
-    private static Comparator<ItemStack> tiebreak(SortLayoutPrefs.Settings settings) {
+    private static Comparator<ItemStack> tiebreak(SortLayoutPrefs.Settings settings, SortContext ctx) {
         Comparator<ItemStack> c = Comparator.comparingInt(ItemSortUtils::typeRank);
         if (settings.groupArmorBySlot()) {
             c = c.thenComparingInt(ItemSortUtils::armorSlotRank);
         }
-        return c.thenComparing(middleChain(settings.tiebreakPriority())).thenComparing(byName());
+        return c.thenComparing(middleChain(settings.tiebreakPriority(), ctx)).thenComparing(ctx.nameComparator());
     }
 
     /**
@@ -80,7 +102,7 @@ public final class ItemSortUtils {
      * tier (always, so a full set stays lined up regardless of the priority setting)
      * -> [enchanted items floated first] -> color -> mod -> name.
      */
-    private static Comparator<ItemStack> smartComparator(SortLayoutPrefs.Settings settings) {
+    private static Comparator<ItemStack> smartComparator(SortLayoutPrefs.Settings settings, SortContext ctx) {
         Comparator<ItemStack> c = Comparator.comparingInt(ItemSortUtils::typeRank);
         if (settings.groupArmorBySlot()) {
             c = c.thenComparingInt(ItemSortUtils::armorSlotRank);
@@ -90,15 +112,15 @@ public final class ItemSortUtils {
             c = c.thenComparingInt(ItemSortUtils::enchantedRank);
         }
         return c.thenComparingInt(ItemSortUtils::colorRank)
-                .thenComparing(ItemSortUtils::modId)
-                .thenComparing(byName());
+                .thenComparing(ctx.modComparator())
+                .thenComparing(ctx.nameComparator());
     }
 
     /** Material, color and mod, reordered by the player's tiebreak priority setting. */
-    private static Comparator<ItemStack> middleChain(TiebreakPriority priority) {
+    private static Comparator<ItemStack> middleChain(TiebreakPriority priority, SortContext ctx) {
         Comparator<ItemStack> material = Comparator.comparingInt(ItemSortUtils::materialRank);
         Comparator<ItemStack> color = Comparator.comparingInt(ItemSortUtils::colorRank);
-        Comparator<ItemStack> mod = Comparator.comparing(ItemSortUtils::modId);
+        Comparator<ItemStack> mod = ctx.modComparator();
         return switch (priority) {
             case COLOR_FIRST -> color.thenComparing(material).thenComparing(mod);
             case MOD_FIRST -> mod.thenComparing(material).thenComparing(color);
@@ -129,27 +151,27 @@ public final class ItemSortUtils {
         return trimmed;
     }
 
-    private static Comparator<ItemStack> byName() {
-        return Comparator.comparing(s -> s.getHoverName().getString());
+    static Comparator<ItemStack> byName() {
+        return Comparator.comparing(SortKeys::sortName);
     }
 
-    private static String modId(ItemStack stack) {
+    static String modId(ItemStack stack) {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
     }
 
-    private static int registryId(ItemStack stack) {
+    static int registryId(ItemStack stack) {
         return BuiltInRegistries.ITEM.getId(stack.getItem());
     }
 
-    private static String path(ItemStack stack) {
+    static String path(ItemStack stack) {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
     }
 
-    private static int typeRank(ItemStack stack) {
+    static int typeRank(ItemStack stack) {
         return ItemCategory.categorize(stack).ordinal();
     }
 
-    private static int armorSlotRank(ItemStack stack) {
+    static int armorSlotRank(ItemStack stack) {
         String path = path(stack);
         for (int i = 0; i < ARMOR_SLOT_ORDER.size(); i++) {
             if (path.contains(ARMOR_SLOT_ORDER.get(i))) return i;
@@ -157,7 +179,7 @@ public final class ItemSortUtils {
         return ARMOR_SLOT_ORDER.size();
     }
 
-    private static int materialRank(ItemStack stack) {
+    static int materialRank(ItemStack stack) {
         String path = path(stack);
         for (int i = 0; i < MATERIAL_ORDER.size(); i++) {
             if (path.contains(MATERIAL_ORDER.get(i))) return i;
@@ -165,7 +187,7 @@ public final class ItemSortUtils {
         return MATERIAL_ORDER.size();
     }
 
-    private static int colorRank(ItemStack stack) {
+    static int colorRank(ItemStack stack) {
         String path = path(stack);
         for (int i = 0; i < COLOR_ORDER.size(); i++) {
             if (path.contains(COLOR_ORDER.get(i))) return i;
@@ -173,7 +195,7 @@ public final class ItemSortUtils {
         return COLOR_ORDER.size();
     }
 
-    private static int enchantedRank(ItemStack stack) {
+    static int enchantedRank(ItemStack stack) {
         return stack.isEnchanted() ? 0 : 1;
     }
 }

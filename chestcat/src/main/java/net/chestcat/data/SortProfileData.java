@@ -119,6 +119,19 @@ public class SortProfileData extends SavedData {
         t.putBoolean("groupArmorBySlot", layout.groupArmorBySlot());
         t.putString("tiebreak", layout.tiebreakPriority().name());
         t.putBoolean("floatEnchantedFirst", layout.floatEnchantedFirst());
+        t.putString("chain", layout.chain());
+        t.putString("favoriteMode", layout.favoriteMode().name());
+        t.putBoolean("mergeStacks", layout.mergeStacks());
+        t.putString("exclusions", layout.exclusions());
+
+        net.chestcat.SortMore more = layout.more();
+        t.putString("emptySlots", more.emptySlots().name());
+        t.putBoolean("hotbarSeparate", more.hotbarSeparate());
+        t.putBoolean("hotbarFavoritesStay", more.hotbarFavoritesStay());
+        t.putBoolean("preserveSelected", more.preserveSelected());
+        t.putString("categoryOrder", more.categoryOrder());
+        t.putString("modOrder", more.modOrder());
+        t.putBoolean("alphaDescending", more.alphaDescending());
 
         GroupingConfig.Settings grouping = profile.grouping();
         t.putBoolean("splitOres", grouping.splitOres());
@@ -140,8 +153,21 @@ public class SortProfileData extends SavedData {
 
         SortLayout sortLayout = enumOr(t.getString("layout"), SortLayout.class, SortLayout.ROWS);
         TiebreakPriority tiebreak = enumOr(t.getString("tiebreak"), TiebreakPriority.class, TiebreakPriority.TYPE_FIRST);
+        // Profiles saved before the multi-level sort update have no chain/favorite fields - fall back to stock behaviour.
+        String chain = t.contains("chain") ? t.getString("chain") : net.chestcat.SortChain.DEFAULT_STRING;
+        net.chestcat.FavoriteMode favoriteMode = enumOr(t.getString("favoriteMode"),
+                net.chestcat.FavoriteMode.class, net.chestcat.FavoriteMode.PIN);
+        boolean mergeStacks = !t.contains("mergeStacks") || t.getBoolean("mergeStacks");
+        // Profiles saved before the extra options existed simply have none of these tags - stock behaviour.
+        net.chestcat.SortMore more = new net.chestcat.SortMore(
+                enumOr(t.getString("emptySlots"), net.chestcat.EmptySlotMode.class, net.chestcat.EmptySlotMode.LAST),
+                t.getBoolean("hotbarSeparate"), t.getBoolean("hotbarFavoritesStay"), t.getBoolean("preserveSelected"),
+                net.chestcat.SortMore.cleanCategoryOrder(t.getString("categoryOrder")),
+                net.chestcat.SortMore.cleanModOrder(t.getString("modOrder")),
+                t.getBoolean("alphaDescending"));
         SortLayoutPrefs.Settings layout = new SortLayoutPrefs.Settings(sortLayout, t.getBoolean("reverse"),
-                t.getBoolean("includeHotbar"), t.getBoolean("groupArmorBySlot"), tiebreak, t.getBoolean("floatEnchantedFirst"));
+                t.getBoolean("includeHotbar"), t.getBoolean("groupArmorBySlot"), tiebreak, t.getBoolean("floatEnchantedFirst"),
+                chain, favoriteMode, mergeStacks, t.getString("exclusions"), more);
 
         Set<ItemCategory> disabled = EnumSet.noneOf(ItemCategory.class);
         ListTag disabledList = t.getList("disabledCategories", StringTag.TAG_STRING);

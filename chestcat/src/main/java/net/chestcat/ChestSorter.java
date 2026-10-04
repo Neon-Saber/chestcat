@@ -2,7 +2,6 @@ package net.chestcat;
 
 import net.chestcat.data.ChestCategoryData;
 import net.chestcat.data.ContainerRulesData;
-import net.chestcat.data.ProtectedItemsData;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -54,7 +53,7 @@ public final class ChestSorter {
         BlockPos center = player.blockPosition();
         ChestCategoryData data = ChestCategoryData.get(level);
         ContainerRulesData rulesData = ContainerRulesData.get(level);
-        ProtectedItemsData protectedItems = ProtectedItemsData.get(level);
+        java.util.function.Predicate<ItemStack> skipStack = FavoriteRules.skipForSort(player);
         SortLayoutPrefs.Settings layout = SortLayoutPrefs.get(player.getUUID());
         GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
         CustomGroups.refresh();
@@ -136,13 +135,13 @@ public final class ChestSorter {
         // shared pool, so they can never be redistributed to a different chest.
         List<ItemStack> pool = new ArrayList<>();
         for (ChestUtil.Storage storage : storages) {
-            pool.addAll(ChestUtil.extractAll(workingContainer.get(storage), protectedItems::isProtected));
+            pool.addAll(ChestUtil.extractAll(workingContainer.get(storage), skipStack));
         }
 
         // Identical stacks merge first, then everything is laid out in sort order, so the same items
         // end up side by side even when a category spans several chests.
         pool = mergeStacks(pool);
-        pool.sort(ItemSortUtils.comparator(sortMode, layout));
+        pool.sort(FavoriteRules.wrap(ItemSortUtils.comparator(sortMode, layout, player), player));
 
         // Item types nothing could place (usually modded): ask the optional AI once, in the
         // background. Never during a preview - a preview must have zero side effects.
@@ -248,7 +247,7 @@ public final class ChestSorter {
         }
 
         for (Container c : allContainersInOrder) {
-            sortContainerContents(c, sortMode, layout, protectedItems::isProtected);
+            sortContainerContents(c, FavoriteRules.wrap(ItemSortUtils.comparator(sortMode, layout, player), player), layout, skipStack);
         }
 
         return new Result(moved, dropped, storages.size());
@@ -292,26 +291,31 @@ public final class ChestSorter {
     }
 
     public static void sortContainer(Container container, ItemSortMode mode) {
-        sortContainerContents(container, mode, SortLayoutPrefs.Settings.DEFAULT, stack -> false);
+        sortContainerContents(container, ItemSortUtils.comparator(mode, SortLayoutPrefs.Settings.DEFAULT),
+                SortLayoutPrefs.Settings.DEFAULT, stack -> false);
     }
 
-    public static void sortContainer(Container container, ItemSortMode mode, ServerPlayer player) {
-        sortContainerContents(container, mode, SortLayoutPrefs.get(player.getUUID()),
-                ProtectedItemsData.get(player.serverLevel())::isProtected);
+    /** Sorts one container for a player using their settings. @return how many slots changed (0 = already sorted). */
+    public static int sortContainer(Container container, ItemSortMode mode, ServerPlayer player) {
+        SortLayoutPrefs.Settings prefs = SortLayoutPrefs.get(player.getUUID());
+        return sortContainerContents(container, FavoriteRules.wrap(ItemSortUtils.comparator(mode, prefs, player), player),
+                prefs, FavoriteRules.skipForSort(player));
     }
 
-    private static void sortContainerContents(Container container, ItemSortMode mode,
+    private static int sortContainerContents(Container container, java.util.Comparator<ItemStack> comparator,
                                               SortLayoutPrefs.Settings layout,
                                               java.util.function.Predicate<ItemStack> protect) {
         int size = container.getContainerSize();
-        if (size == 0) return;
+        if (size == 0) return 0;
 
         // A protected stack is left in its slot entirely - never picked up, so it
         // can't be reordered or moved even within the same container.
         List<ItemStack> items = new ArrayList<>();
         boolean[] protectedSlot = new boolean[size];
+        ItemStack[] before = new ItemStack[size];
         for (int i = 0; i < size; i++) {
             ItemStack s = container.getItem(i);
+            before[i] = s.copy();
             if (s.isEmpty()) continue;
             if (protect.test(s)) {
                 protectedSlot[i] = true;
@@ -322,7 +326,7 @@ public final class ChestSorter {
         }
 
         items = mergeStacks(items);
-        items.sort(ItemSortUtils.comparator(mode, layout));
+        items.sort(comparator);
 
         int cols = (size % 9 == 0) ? 9 : size;
         int rows = size / cols;
@@ -335,9 +339,21 @@ public final class ChestSorter {
         }
 
         List<Integer> order = SortGrid.fillOrder(grid, layout.layout(), layout.reverse());
-        for (int i = 0; i < items.size() && i < order.size(); i++) {
-            container.setItem(order.get(i), items.get(i));
+        int start = SortGrid.startIndex(order.size(), items.size(), layout.more().emptySlots() == EmptySlotMode.FIRST);
+        for (int i = 0; i < items.size() && start + i < order.size(); i++) {
+            container.setItem(order.get(start + i), items.get(i));
         }
+
+        int changed = 0;
+        for (int i = 0; i < size; i++) {
+            if (protectedSlot[i]) continue;
+            ItemStack now = container.getItem(i);
+            ItemStack was = before[i];
+            boolean same = (was.isEmpty() && now.isEmpty())
+                    || (was.getCount() == now.getCount() && ItemStack.isSameItemSameComponents(was, now));
+            if (!same) changed++;
+        }
+        return changed;
     }
 
     /** Dominant key (category + sub-type, when splitting is on) of what's currently in the container. */

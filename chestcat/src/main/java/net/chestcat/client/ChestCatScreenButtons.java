@@ -40,7 +40,6 @@ import java.util.List;
 @EventBusSubscriber(modid = "chestcat", value = Dist.CLIENT)
 public class ChestCatScreenButtons {
 
-    private static final int SIZE = 14;
     private static final int GAP = 3;
     private static final int ROW_MARGIN = 3;
     private static final int INNER_MARGIN = 8;
@@ -49,12 +48,25 @@ public class ChestCatScreenButtons {
 
     private record VButton(int x, int y, String label, String tooltip, Runnable onClick) {}
 
+    private record Def(String label, String tooltip, Runnable action) {}
+
+    // Ctrl+drag moves the whole panel; the offset is saved with the rest of the client prefs.
+    private static boolean dragging = false;
+    private static double grabMouseX, grabMouseY;
+    private static int grabOffsetX, grabOffsetY;
+
+    /** Button edge length: the base size scaled by the panel-scale setting. */
+    private static int size() {
+        return Math.max(8, Math.round(ClientUi.buttonSize * ClientUi.panelScale / 100.0F));
+    }
+
     @SubscribeEvent
     public static void onRender(ScreenEvent.Render.Post event) {
         if (!(event.getScreen() instanceof AbstractContainerScreen<?> screen)) return;
 
         List<VButton> buttons = buildButtons(screen);
         if (buttons.isEmpty()) return;
+        ClientUi.currentMenuId = ChestCatActions.isInventoryStyle(screen) ? "" : net.chestcat.MenuSorting.menuId(screen.getMenu());
 
         GuiGraphics graphics = event.getGuiGraphics();
         Minecraft mc = Minecraft.getInstance();
@@ -65,14 +77,14 @@ public class ChestCatScreenButtons {
 
         VButton hovered = null;
         for (VButton b : buttons) {
-            boolean over = mx >= b.x() && mx < b.x() + SIZE && my >= b.y() && my < b.y() + SIZE;
+            boolean over = mx >= b.x() && mx < b.x() + size() && my >= b.y() && my < b.y() + size();
             if (over) hovered = b;
-            drawButton(graphics, font, b, over);
+            drawButton(graphics, font, b, over && ClientUi.hoverEffects);
         }
 
         if (hovered != null) {
             int top = Integer.MAX_VALUE, bottom = 0;
-            for (VButton b : buttons) { top = Math.min(top, b.y()); bottom = Math.max(bottom, b.y() + SIZE); }
+            for (VButton b : buttons) { top = Math.min(top, b.y()); bottom = Math.max(bottom, b.y() + size()); }
             drawTooltip(graphics, font, hovered.tooltip(), hovered.x(), top, bottom);
         }
     }
@@ -84,110 +96,166 @@ public class ChestCatScreenButtons {
 
         for (VButton b : buildButtons(screen)) {
             double mx = event.getMouseX(), my = event.getMouseY();
-            if (mx < b.x() || mx >= b.x() + SIZE || my < b.y() || my >= b.y() + SIZE) continue;
-            if (b.onClick() != null) b.onClick().run();
+            if (mx < b.x() || mx >= b.x() + size() || my < b.y() || my >= b.y() + size()) continue;
+            if (net.minecraft.client.gui.screens.Screen.hasControlDown()) {
+                dragging = true;
+                grabMouseX = mx;
+                grabMouseY = my;
+                grabOffsetX = ClientUi.offsetX;
+                grabOffsetY = ClientUi.offsetY;
+            } else if (b.onClick() != null) {
+                b.onClick().run();
+            }
             event.setCanceled(true);
             return;
         }
     }
 
-    private static boolean isPlayerInventoryStyleScreen(AbstractContainerScreen<?> screen) {
-        if (screen.getMenu() instanceof InventoryMenu) return true;
-        if (screen instanceof CreativeModeInventoryScreen cmis) {
-            CreativeModeTab tab = cmis.selectedTab;
-            return tab != null && tab.getType() == CreativeModeTab.Type.INVENTORY;
+    @SubscribeEvent
+    public static void onMouseDragged(ScreenEvent.MouseDragged.Pre event) {
+        if (!dragging) return;
+        ClientUi.offsetX = grabOffsetX + (int) Math.round(event.getMouseX() - grabMouseX);
+        ClientUi.offsetY = grabOffsetY + (int) Math.round(event.getMouseY() - grabMouseY);
+        event.setCanceled(true);
+    }
+
+    @SubscribeEvent
+    public static void onMouseReleased(ScreenEvent.MouseButtonReleased.Pre event) {
+        if (dragging && event.getButton() == 0) {
+            dragging = false;
+            event.setCanceled(true);
         }
-        return false;
-    }
-
-    private static void sortInventory(ItemSortMode mode) {
-        SortSettings.sync();
-        PacketDistributor.sendToServer(new SortInventoryPayload(mode));
-    }
-
-    private static void sortChest(ItemSortMode mode) {
-        SortSettings.sync();
-        PacketDistributor.sendToServer(new SortOpenContainerPayload(mode));
-    }
-
-    private static void sortNearby() {
-        SortSettings.sync();
-        PacketDistributor.sendToServer(new SortNearbyPayload(NetworkHandler.DEFAULT_RADIUS,
-                ChestCatClient.inventorySortMode));
     }
 
     private static List<VButton> buildButtons(AbstractContainerScreen<?> screen) {
-        List<VButton> list = new ArrayList<>();
-
-        if (isPlayerInventoryStyleScreen(screen)) {
-            int gridX = screen.getGuiLeft() + screen.getXSize() + OUTER_MARGIN;
-            int gridY = screen.getGuiTop() + INNER_MARGIN;
-            ItemSortMode mode = ChestCatClient.inventorySortMode;
-
-            String[] labels = {"S", "M", "L", "O", "N", "Q"};
-            String[] tooltips = {
-                    "Sort inventory: " + mode.getDisplayName() + " / " + SortSettings.summary(),
-                    "Next sort mode",
-                    "Pick sort mode from a list",
-                    "Sort options: rows or columns, start corner, hotbar",
-                    "Sort inventory + nearby chests",
-                    "Quick-stack matching items into nearby chests"
-            };
-            Runnable[] actions = {
-                    () -> sortInventory(ChestCatClient.inventorySortMode),
-                    () -> ChestCatClient.inventorySortMode = ChestCatClient.inventorySortMode.next(),
-                    () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(screen,
-                            picked -> {
-                                ChestCatClient.inventorySortMode = picked;
-                                sortInventory(picked);
-                            })),
-                    () -> Minecraft.getInstance().setScreen(new SortSettingsScreen(screen)),
-                    ChestCatScreenButtons::sortNearby,
-                    () -> PacketDistributor.sendToServer(new QuickStackPayload())
-            };
-            addGrid(list, gridX, gridY, labels, tooltips, actions);
-
-        } else if (screen.getMenu() instanceof ChestMenu) {
-            int x = Math.max(0, screen.getGuiLeft());
-            int y = Math.max(0, screen.getGuiTop() - SIZE - ROW_MARGIN);
-            ItemSortMode mode = ChestCatClient.chestSortMode;
-
-            list.add(new VButton(x, y, "S",
-                    "Sort chest: " + mode.getDisplayName() + " / " + SortSettings.summary(),
-                    () -> sortChest(ChestCatClient.chestSortMode)));
-            x += SIZE + GAP;
-            list.add(new VButton(x, y, "M", "Next sort mode",
-                    () -> ChestCatClient.chestSortMode = ChestCatClient.chestSortMode.next()));
-            x += SIZE + GAP;
-            list.add(new VButton(x, y, "L", "Pick sort mode from a list",
-                    () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(screen,
-                            picked -> {
-                                ChestCatClient.chestSortMode = picked;
-                                sortChest(picked);
-                            }))));
-            x += SIZE + GAP;
-            list.add(new VButton(x, y, "O", "Sort options: rows or columns, start corner",
-                    () -> Minecraft.getInstance().setScreen(new SortSettingsScreen(screen))));
-            x += SIZE + GAP;
-            list.add(new VButton(x, y, "G", "Pull everything from this chest into your inventory",
-                    () -> PacketDistributor.sendToServer(new DumpChestPayload())));
-            x += SIZE + GAP;
-            list.add(new VButton(x, y, "P", "Push your inventory into this chest",
-                    () -> PacketDistributor.sendToServer(new SortIntoChestPayload())));
+        boolean inventoryStyle = ChestCatActions.isInventoryStyle(screen);
+        List<Def> defs;
+        if (inventoryStyle) {
+            defs = inventoryDefs(screen);
+        } else if (ChestCatActions.isStorageScreen(screen)) {
+            defs = chestDefs(screen);
+        } else {
+            return List.of();
         }
-
-        return list;
+        return layout(screen, defs, inventoryStyle);
     }
 
-    private static void addGrid(List<VButton> list, int gridX, int gridY,
-                                String[] labels, String[] tooltips, Runnable[] actions) {
-        for (int i = 0; i < labels.length; i++) {
-            int col = i % GRID_COLS;
-            int row = i / GRID_COLS;
-            int x = gridX + col * (SIZE + GAP);
-            int y = gridY + row * (SIZE + GAP);
-            list.add(new VButton(x, y, labels[i], tooltips[i], actions[i]));
+    private static String modeTooltip(ItemSortMode mode) {
+        String base = mode.getDisplayName() + " / " + SortSettings.summary();
+        if (mode == ItemSortMode.CUSTOM) {
+            base += ". Chain: " + net.chestcat.SortChain.parse(SortSettings.chain).describe();
         }
+        return base;
+    }
+
+    private static List<Def> inventoryDefs(AbstractContainerScreen<?> screen) {
+        List<Def> defs = new ArrayList<>();
+        defs.add(new Def("S", "Sort inventory: " + modeTooltip(ChestCatClient.inventorySortMode),
+                () -> ChestCatActions.sortInventory(ChestCatClient.inventorySortMode, false)));
+        defs.add(new Def("M", "Next sort mode",
+                () -> ChestCatClient.inventorySortMode = ChestCatClient.inventorySortMode.next()));
+        defs.add(new Def("L", "Pick sort mode from a list",
+                () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(screen, picked -> {
+                    ChestCatClient.inventorySortMode = picked;
+                    ChestCatActions.sortInventory(picked, false);
+                }))));
+        defs.add(new Def("O", "Sort options, favorites, ignore rules and the sort chain. Ctrl+drag any button to move this panel.",
+                () -> Minecraft.getInstance().setScreen(new SortSettingsScreen(screen))));
+        defs.add(new Def("N", "Sort inventory + nearby chests", ChestCatActions::sortNearby));
+        defs.add(new Def("Q", "Quick-stack matching items into nearby chests",
+                ChestCatActions::quickStack));
+        defs.add(new Def("F", "Favorites filter (" + (ClientUi.favoritesFilter ? "ON" : "OFF")
+                + "): dims every item that isn't a favorite so favorites stand out.",
+                ChestCatActions::toggleFavoritesFilter));
+        defs.add(new Def("R", "Presets and saved profiles (Combat, Building, Mining, ...)",
+                () -> Minecraft.getInstance().setScreen(new PresetPickerScreen(screen))));
+        return defs;
+    }
+
+    private static List<Def> chestDefs(AbstractContainerScreen<?> screen) {
+        List<Def> defs = new ArrayList<>();
+        defs.add(new Def("S", "Sort chest: " + modeTooltip(ChestCatClient.chestSortMode),
+                () -> ChestCatActions.sortContainer(ChestCatClient.chestSortMode, false)));
+        defs.add(new Def("M", "Next sort mode",
+                () -> ChestCatClient.chestSortMode = ChestCatClient.chestSortMode.next()));
+        defs.add(new Def("L", "Pick sort mode from a list",
+                () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(screen, picked -> {
+                    ChestCatClient.chestSortMode = picked;
+                    ChestCatActions.sortContainer(picked, false);
+                }))));
+        defs.add(new Def("O", "Sort options, favorites, ignore rules and the sort chain. Ctrl+drag any button to move this panel.",
+                () -> Minecraft.getInstance().setScreen(new SortSettingsScreen(screen))));
+        defs.add(new Def("G", "Pull everything from this chest into your inventory",
+                () -> PacketDistributor.sendToServer(new DumpChestPayload())));
+        defs.add(new Def("P", "Push your inventory into this chest",
+                () -> PacketDistributor.sendToServer(new SortIntoChestPayload())));
+        defs.add(new Def("F", "Favorites filter (" + (ClientUi.favoritesFilter ? "ON" : "OFF")
+                + "): dims every item that isn't a favorite so favorites stand out.",
+                ChestCatActions::toggleFavoritesFilter));
+        defs.add(new Def("R", "Presets and saved profiles (Combat, Building, Mining, ...)",
+                () -> Minecraft.getInstance().setScreen(new PresetPickerScreen(screen))));
+        return defs;
+    }
+
+    /**
+     * Places the buttons for the chosen panel position. DEFAULT keeps the classic spots (a 3-wide grid beside
+     * inventory screens, a single row above chests); the other presets move the panel above, below, left or right
+     * of the GUI. The saved Ctrl+drag offset is added on top, then the whole panel is kept on screen.
+     */
+    private static List<VButton> layout(AbstractContainerScreen<?> screen, List<Def> defs, boolean inventoryStyle) {
+        Minecraft mc = Minecraft.getInstance();
+        int screenW = mc.getWindow().getGuiScaledWidth();
+        int screenH = mc.getWindow().getGuiScaledHeight();
+        int s = size();
+
+        ClientUi.GuiPreset placement = ClientUi.preset;
+        if (placement == ClientUi.GuiPreset.DEFAULT) {
+            placement = inventoryStyle ? ClientUi.GuiPreset.RIGHT : ClientUi.GuiPreset.ABOVE;
+        }
+
+        boolean grid;
+        int originX;
+        int originY;
+        int gridWidth = GRID_COLS * (s + GAP) - GAP;
+        switch (placement) {
+            case LEFT -> {
+                grid = true;
+                originX = screen.getGuiLeft() - OUTER_MARGIN - gridWidth;
+                originY = screen.getGuiTop() + INNER_MARGIN;
+            }
+            case ABOVE -> {
+                grid = false;
+                originX = screen.getGuiLeft();
+                originY = screen.getGuiTop() - s - ROW_MARGIN;
+            }
+            case BELOW -> {
+                grid = false;
+                originX = screen.getGuiLeft();
+                originY = screen.getGuiTop() + screen.getYSize() + ROW_MARGIN;
+            }
+            default -> { // RIGHT
+                grid = true;
+                originX = screen.getGuiLeft() + screen.getXSize() + OUTER_MARGIN;
+                originY = screen.getGuiTop() + INNER_MARGIN;
+            }
+        }
+        originX += ClientUi.offsetX;
+        originY += ClientUi.offsetY;
+
+        int n = defs.size();
+        int panelW = grid ? gridWidth : n * (s + GAP) - GAP;
+        int panelH = grid ? ((n + GRID_COLS - 1) / GRID_COLS) * (s + GAP) - GAP : s;
+        originX = Math.max(0, Math.min(originX, screenW - panelW));
+        originY = Math.max(0, Math.min(originY, screenH - panelH));
+
+        List<VButton> list = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            int x = grid ? originX + (i % GRID_COLS) * (s + GAP) : originX + i * (s + GAP);
+            int y = grid ? originY + (i / GRID_COLS) * (s + GAP) : originY;
+            Def d = defs.get(i);
+            list.add(new VButton(x, y, d.label(), d.tooltip(), d.action()));
+        }
+        return list;
     }
 
     private static void drawButton(GuiGraphics graphics, Font font, VButton b, boolean hovered) {
@@ -195,13 +263,18 @@ public class ChestCatScreenButtons {
         int bg = hovered ? 0xF03A3F4B : 0xE0242730;
         int accent = hovered ? 0xFF6FB4FF : 0xFF4A4E58;
 
-        fillRounded(graphics, x, y + 1, SIZE, SIZE, 0x40000000);
-        fillRounded(graphics, x, y, SIZE, SIZE, bg);
-        graphics.fill(x + 1, y, x + SIZE - 1, y + 1, accent);
-        graphics.fill(x + 1, y + SIZE - 1, x + SIZE - 1, y + SIZE, accent);
-        graphics.fill(x, y + 1, x + 1, y + SIZE - 1, accent);
-        graphics.fill(x + SIZE - 1, y + 1, x + SIZE, y + SIZE - 1, accent);
-        graphics.drawCenteredString(font, b.label(), x + SIZE / 2, y + (SIZE - 8) / 2, 0xFFEDEDED);
+        fillRounded(graphics, x, y + 1, size(), size(), 0x40000000);
+        fillRounded(graphics, x, y, size(), size(), bg);
+        graphics.fill(x + 1, y, x + size() - 1, y + 1, accent);
+        graphics.fill(x + 1, y + size() - 1, x + size() - 1, y + size(), accent);
+        graphics.fill(x, y + 1, x + 1, y + size() - 1, accent);
+        graphics.fill(x + size() - 1, y + 1, x + size(), y + size() - 1, accent);
+        float ts = Math.max(0.6F, size() / 14.0F);
+        graphics.pose().pushPose();
+        graphics.pose().translate(x + size() / 2.0F, y + size() / 2.0F, 0.0F);
+        graphics.pose().scale(ts, ts, 1.0F);
+        graphics.drawCenteredString(font, b.label(), 0, -4, 0xFFEDEDED);
+        graphics.pose().popPose();
     }
 
     private static void fillRounded(GuiGraphics graphics, int x, int y, int w, int h, int color) {

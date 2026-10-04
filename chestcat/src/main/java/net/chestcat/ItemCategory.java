@@ -102,7 +102,8 @@ public enum ItemCategory {
         }
 
         if (item instanceof SwordItem || item instanceof BowItem
-                || item instanceof CrossbowItem || item instanceof TridentItem) {
+                || item instanceof CrossbowItem || item instanceof TridentItem
+                || item instanceof MaceItem || item instanceof ShieldItem) {
             return WEAPONS;
         }
 

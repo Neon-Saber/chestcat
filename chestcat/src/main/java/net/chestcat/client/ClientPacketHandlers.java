@@ -1,5 +1,9 @@
 package net.chestcat.client;
 
+import net.chestcat.network.ApplyProfileExtrasPayload;
+import net.chestcat.network.ApplyProfileMorePayload;
+import net.chestcat.network.FavoritesSyncPayload;
+import net.chestcat.network.SlotLocksSyncPayload;
 import net.chestcat.network.ApplyProfileGroupingPayload;
 import net.chestcat.network.ApplyProfileLayoutPayload;
 import net.chestcat.network.ApplyProfileModesPayload;
@@ -43,6 +47,33 @@ public final class ClientPacketHandlers {
             SortSettings.tiebreakPriority = payload.tiebreakPriority();
             SortSettings.floatEnchantedFirst = payload.floatEnchantedFirst();
         });
+    }
+
+    public static void handleFavoritesSync(FavoritesSyncPayload payload) {
+        Minecraft.getInstance().execute(() -> ClientFavorites.replace(payload.keys()));
+    }
+
+    public static void handleSlotLocksSync(SlotLocksSyncPayload payload) {
+        Minecraft.getInstance().execute(() -> {
+            SlotLockHandler.lockedMirror.clear();
+            SlotLockHandler.lockedMirror.addAll(payload.slots());
+        });
+    }
+
+    public static void handleApplyProfileExtras(ApplyProfileExtrasPayload payload) {
+        Minecraft.getInstance().execute(() -> {
+            SortSettings.chain = payload.chain();
+            SortSettings.favoriteMode = payload.favoriteMode();
+            SortSettings.mergeStacks = payload.mergeStacks();
+            SortSettings.exclusions = new ArrayList<>();
+            for (String rule : payload.exclusions().split(";")) {
+                if (!rule.isBlank()) SortSettings.exclusions.add(rule.strip());
+            }
+        });
+    }
+
+    public static void handleApplyProfileMore(ApplyProfileMorePayload payload) {
+        Minecraft.getInstance().execute(() -> SortSettings.more = payload.more());
     }
 
     public static void handleApplyProfileGrouping(ApplyProfileGroupingPayload payload) {

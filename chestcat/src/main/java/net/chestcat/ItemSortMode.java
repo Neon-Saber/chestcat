@@ -11,7 +11,13 @@ public enum ItemSortMode {
     MATERIAL("By Material Tier"),
     COLOR("By Color"),
     SMART("Smart Sort (Recommended)"),
-    REGISTRY_ORDER("Registry Order");
+    REGISTRY_ORDER("Registry Order"),
+    // Added with the multi-level sort overhaul - appended so saved ordinals/names stay valid.
+    CATEGORY_MOD("Category > Mod > Name"),
+    MOD_CATEGORY("Mod > Category > Name"),
+    RARITY("By Rarity"),
+    DURABILITY("By Durability"),
+    CUSTOM("Custom Chain (your own rules)");
 
     private final String displayName;
 

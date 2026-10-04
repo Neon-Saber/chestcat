@@ -54,6 +54,13 @@ public class SortProfilesScreen extends Screen {
                 })
                 .bounds(x + w - 64, 34, 64, 20).build());
 
+        this.addRenderableWidget(Button.builder(Component.literal("This computer..."),
+                        b -> this.minecraft.setScreen(new ClientProfilesScreen(this)))
+                .bounds(6, 6, 104, 20)
+                .tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                        "Profiles stored on this computer that work in every world and server.")))
+                .build());
+
         this.list = new ProfileList(this.minecraft, this.width, this.height - 100, 62, 24);
         this.list.setNames(ClientPacketHandlers.latestProfileNames);
         this.addWidget(this.list);

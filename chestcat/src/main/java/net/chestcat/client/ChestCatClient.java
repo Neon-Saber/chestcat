@@ -4,7 +4,6 @@ import net.chestcat.ChestUtil;
 import net.chestcat.ItemSortMode;
 import net.chestcat.network.NetworkHandler;
 import net.chestcat.network.RequestNearbyChestsPayload;
-import net.chestcat.network.SortInventoryPayload;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -67,6 +66,10 @@ public class ChestCatClient {
     public static final KeyMapping ASSIGN_CATEGORY_MODIFIER_KEY = new KeyMapping(
             "key.chestcat.assign_category_modifier", InputConstants.Type.KEYSYM, InputConstants.KEY_LSHIFT, "key.categories.chestcat");
 
+    /** Hover an item in any container screen and press this to favorite / unfavorite it (Alt+click works too). */
+    public static final KeyMapping FAVORITE_KEY = new KeyMapping(
+            "key.chestcat.favorite_item", InputConstants.Type.KEYSYM, InputConstants.KEY_Z, "key.categories.chestcat");
+
     public static void startLocate(BlockPos pos) {
         locateTarget = pos;
         locateBox = wholeChestBox(pos);
@@ -117,7 +120,7 @@ public class ChestCatClient {
         }
 
         while (SORT_INVENTORY_KEY.consumeClick()) {
-            PacketDistributor.sendToServer(new SortInventoryPayload(inventorySortMode));
+            ChestCatActions.sortInventory(inventorySortMode, false); // syncs settings first (the server forgets them on logout)
         }
 
         while (ASSIGN_CATEGORY_KEY.consumeClick()) {
