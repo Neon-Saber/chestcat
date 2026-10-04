@@ -303,35 +303,12 @@ public class SlotLockHandler {
         }
         graphics.pose().popPose();
 
-        // The hint is added to the item's own tooltip (see onTooltip) instead of drawing a second tooltip on top of it.
-        hintStack = starHover == null ? ItemStack.EMPTY : starHover.getItem();
-        hintReady = dwellReady;
-    }
-
-    /** The stack whose star the mouse is resting on, and whether it is ready to be clicked (set every frame). */
-    private static ItemStack hintStack = ItemStack.EMPTY;
-    private static boolean hintReady = false;
-
-    /**
-     * Favorites show up inside the normal item tooltip: favorited items get a gold "Favorite" line, and while the
-     * mouse rests on the star a short how-to line appears. One tooltip, never two stacked on each other.
-     */
-    @SubscribeEvent
-    public static void onTooltip(net.neoforged.neoforge.event.entity.player.ItemTooltipEvent event) {
-        if (!ClientUi.showFavorites) return;
-        if (!(Minecraft.getInstance().screen instanceof AbstractContainerScreen<?>)) return;
-        ItemStack stack = event.getItemStack();
-        if (stack.isEmpty()) return;
-
-        boolean fav = ClientFavorites.isFavorite(stack);
-        if (fav) {
-            event.getToolTip().add(Component.literal("\u2605 Favorite").withStyle(net.minecraft.ChatFormatting.GOLD));
-        }
-        if (stack == hintStack) {
-            String text = hintReady
+        if (starHover != null) {
+            boolean fav = ClientFavorites.isFavorite(starHover.getItem());
+            String hint = dwellReady
                     ? (fav ? "Click to remove from favorites" : "Click to add to favorites")
                     : "Hold the mouse here to " + (fav ? "unfavorite" : "favorite");
-            event.getToolTip().add(Component.literal(text + " (Alt+Click / Z)").withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+            graphics.renderTooltip(font, Component.literal(hint + "  (Alt+Click / Z)"), (int) mx, (int) my);
         }
     }
 
