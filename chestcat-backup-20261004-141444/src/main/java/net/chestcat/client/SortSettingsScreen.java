@@ -16,7 +16,7 @@ public class SortSettingsScreen extends Screen {
     private final Screen parent;
 
     public SortSettingsScreen(Screen parent) {
-        super(Component.literal("More Settings"));
+        super(Component.literal("Sort Options"));
         this.parent = parent;
     }
 

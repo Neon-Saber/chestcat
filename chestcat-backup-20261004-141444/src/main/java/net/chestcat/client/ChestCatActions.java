@@ -98,7 +98,7 @@ public final class ChestCatActions {
     }
 
     public static void openSettings(Screen parent) {
-        Minecraft.getInstance().setScreen(new SimpleSettingsScreen(parent));
+        Minecraft.getInstance().setScreen(new SortSettingsScreen(parent));
     }
 
     /** Applies the next built-in preset. */

@@ -26,7 +26,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Favorites and slot locks in every container screen (and the creative inventory).
+ * Favorites and slot locks in every container screen.
  *
  * FAVORITES are tied to the ITEM (see FavoriteKey), not the slot: favorite a Diamond Sword once and it
  * stays favorited through sorting, chests and the hotbar. Drawn as a gold star ABOVE the item (and a
@@ -63,34 +63,8 @@ public class SlotLockHandler {
 
     // ---------------------------------------------------------------- geometry
 
-    /** Every container screen, including the creative inventory (where only the player's own slots take part). */
     private static boolean supported(Screen screen) {
-        return screen instanceof AbstractContainerScreen<?>;
-    }
-
-    /**
-     * Whether a slot can carry a favorite star. In the creative screen the item-picker tabs show fake stacks, so
-     * only slots backed by the player's real inventory count there; everywhere else every slot counts.
-     */
-    private static boolean eligible(AbstractContainerScreen<?> screen, Slot slot) {
-        return !(screen instanceof CreativeModeInventoryScreen) || slot.container instanceof Inventory;
-    }
-
-    /**
-     * The slot number the SERVER knows for this stack. Normally it is just the slot's index in the open menu. The
-     * creative screen has its own client-only menu, so there the matching slot of the player's real inventory
-     * menu is found by the stack itself (the creative inventory tab shows the very same stack objects).
-     */
-    private static int serverMenuIndex(AbstractContainerScreen<?> screen, Slot slot) {
-        if (!(screen instanceof CreativeModeInventoryScreen)) return screen.getMenu().slots.indexOf(slot);
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return -1;
-        ItemStack stack = slot.getItem();
-        var slots = mc.player.inventoryMenu.slots;
-        for (int i = 0; i < slots.size(); i++) {
-            if (slots.get(i).getItem() == stack) return i;
-        }
-        return -1;
+        return screen instanceof AbstractContainerScreen<?> && !(screen instanceof CreativeModeInventoryScreen);
     }
 
     private static int slotX(AbstractContainerScreen<?> screen, Slot slot) {
@@ -133,7 +107,7 @@ public class SlotLockHandler {
     /** The slot whose star the mouse is on (only stars of slots holding an item count). */
     private static Slot starAt(AbstractContainerScreen<?> screen, double mx, double my) {
         for (Slot slot : screen.getMenu().slots) {
-            if (!slot.hasItem() || !eligible(screen, slot)) continue;
+            if (!slot.hasItem()) continue;
             if (overStar(slotX(screen, slot), slotY(screen, slot), mx, my)) return slot;
         }
         return null;
@@ -162,7 +136,7 @@ public class SlotLockHandler {
         }
 
         Slot hovered = slotAt(screen, mx, my);
-        if (hovered == null || !hovered.hasItem() || !eligible(screen, hovered)) return;
+        if (hovered == null || !hovered.hasItem()) return;
 
         // 2) Alt + left click anywhere on the slot.
         if (event.getButton() == 0 && Screen.hasAltDown()) {
@@ -192,7 +166,7 @@ public class SlotLockHandler {
         if (screen.getFocused() instanceof EditBox box && box.isFocused()) return; // typing in a search box
 
         Slot hovered = screen.getSlotUnderMouse();
-        if (hovered == null || !hovered.hasItem() || !eligible(screen, hovered)) return;
+        if (hovered == null || !hovered.hasItem()) return;
         toggleFavorite(screen, hovered);
         event.setCanceled(true);
     }
@@ -200,7 +174,7 @@ public class SlotLockHandler {
     private static void toggleFavorite(AbstractContainerScreen<?> screen, Slot slot) {
         ItemStack stack = slot.getItem();
         if (stack.isEmpty()) return;
-        int menuIndex = serverMenuIndex(screen, slot);
+        int menuIndex = screen.getMenu().slots.indexOf(slot);
         if (menuIndex < 0) return;
         boolean nowFavorite = ClientFavorites.toggleLocal(stack);
         playFeedback(nowFavorite);
@@ -261,7 +235,7 @@ public class SlotLockHandler {
         graphics.pose().translate(0.0F, 0.0F, 300.0F); // above item icons and counts
 
         for (Slot slot : screen.getMenu().slots) {
-            if (!slot.hasItem() || !eligible(screen, slot)) continue;
+            if (!slot.hasItem()) continue;
             int x = slotX(screen, slot);
             int y = slotY(screen, slot);
             ItemStack stack = slot.getItem();

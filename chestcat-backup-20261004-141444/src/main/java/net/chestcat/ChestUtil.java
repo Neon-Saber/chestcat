@@ -1,0 +1,228 @@
+package net.chestcat;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.entity.BarrelBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+public final class ChestUtil {
+
+    private ChestUtil() {}
+
+    // Common tags mods use to mark their chests / barrels (Iron Chests, Sophisticated Storage, etc.).
+    private static final TagKey<Block> CHESTS_TAG =
+            TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath("c", "chests"));
+    private static final TagKey<Block> BARRELS_TAG =
+            TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath("c", "barrels"));
+
+    /**
+     * Whether a block entity is real item STORAGE that ChestCat may sort into / pull from.
+     * Vanilla chests, trapped chests and barrels always are. Anything else that merely exposes a
+     * Container (furnaces, smokers, blast furnaces, hoppers, droppers, brewing stands, crafters,
+     * shulker boxes, modded machines...) is left completely alone unless a mod tags its block as
+     * c:chests / c:barrels, or you list it under "extraStorage" in config/chestcat/groups.json.
+     */
+    public static boolean isStorage(Level level, BlockPos pos, BlockEntity be) {
+        if (be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity) return true;
+        if (!(be instanceof Container)) return false;
+        BlockState state = level.getBlockState(pos);
+        if (state.is(CHESTS_TAG) || state.is(BARRELS_TAG)) return true;
+        CustomGroups.refresh();
+        return CustomGroups.isExtraStorage(BuiltInRegistries.BLOCK.getKey(state.getBlock()));
+    }
+
+    public enum Kind { CHEST, BARREL, MODDED }
+
+    /** A single logical storage container: one chest, one double chest (merged), one barrel, or a modded container block. */
+    public record Storage(BlockPos canonicalPos, Container container, Kind kind, String modId) {}
+
+    /**
+     * Scans a cube around center for chests, barrels, and any other block entity that
+     * exposes a Container (modded storage), merging double chests into one logical
+     * Storage so they're treated (and categorized/filled) as a single unit.
+     *
+     * Ender chests are intentionally excluded here - see findNearbyEnderChests below -
+     * since their contents are per-player, not per-block, so they can't be sorted into
+     * like a normal container.
+     */
+    public static List<Storage> findNearbyStorages(ServerLevel level, BlockPos center, int radius) {
+        List<Storage> result = new ArrayList<>();
+        Set<BlockPos> visited = new HashSet<>();
+
+        BlockPos min = center.offset(-radius, -radius, -radius);
+        BlockPos max = center.offset(radius, radius, radius);
+
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (visited.contains(pos)) continue;
+            BlockEntity be = level.getBlockEntity(pos);
+            if (be == null) continue;
+
+            if (be instanceof ChestBlockEntity) {
+                BlockState state = level.getBlockState(pos);
+                Container container = ChestBlock.getContainer(
+                        (net.minecraft.world.level.block.ChestBlock) state.getBlock(),
+                        state, level, pos, true);
+                if (container == null) continue;
+
+                BlockPos canonical = canonicalChestPos(level, pos);
+                if (visited.contains(canonical)) continue;
+                visited.add(pos);
+                visited.add(canonical);
+                // Only the chest's REAL paired half (by TYPE/FACING) counts - two separate single
+                // chests sitting side by side are NOT a double chest.
+                BlockPos connectedOther = connectedHalf(level, pos);
+                if (connectedOther != null) visited.add(connectedOther);
+                BlockPos nonCanonical = connectedOther == null ? null : (pos.equals(canonical) ? connectedOther : pos);
+                if (nonCanonical != null && !nonCanonical.equals(canonical)) {
+                    net.chestcat.data.ChestCategoryData.get(level).migrateDoubleChest(canonical, nonCanonical.immutable());
+                }
+
+                result.add(new Storage(canonical, container, Kind.CHEST, "minecraft"));
+            } else if (be instanceof BarrelBlockEntity barrel) {
+                visited.add(pos);
+                result.add(new Storage(pos.immutable(), barrel, Kind.BARREL, "minecraft"));
+            } else if (be instanceof EnderChestBlockEntity) {
+                // Handled separately - see findNearbyEnderChests.
+                visited.add(pos);
+            } else if (be instanceof Container container && isStorage(level, pos, be)) {
+                // Modded storage explicitly tagged as a chest/barrel (or allow-listed in the
+                // config) - grouped by the block's own registry namespace.
+                visited.add(pos);
+                String modId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).getNamespace();
+                result.add(new Storage(pos.immutable(), container, Kind.MODDED, modId));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Ender chests found nearby - listed for locating/organizing only, never sorted
+     * into, since every ender chest shares one inventory per player.
+     */
+    public static List<BlockPos> findNearbyEnderChests(ServerLevel level, BlockPos center, int radius) {
+        List<BlockPos> result = new ArrayList<>();
+        BlockPos min = center.offset(-radius, -radius, -radius);
+        BlockPos max = center.offset(radius, radius, radius);
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (level.getBlockEntity(pos) instanceof EnderChestBlockEntity) {
+                result.add(pos.immutable());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Whichever half of a (possibly double) chest sorts lower on X then Z - so both
+     * halves, and any code that only has one half's BlockPos (a raycast, a saved
+     * assignment), always resolve to the same key. Safe to call on a non-chest or
+     * single chest too: it just returns pos back.
+     */
+    public static BlockPos canonicalChestPos(Level level, BlockPos pos) {
+        BlockPos other = connectedHalf(level, pos);
+        if (other != null && (other.getX() < pos.getX()
+                || (other.getX() == pos.getX() && other.getZ() < pos.getZ()))) {
+            return other.immutable();
+        }
+        return pos.immutable();
+    }
+
+    /**
+     * The other half of a double chest, or null for a single chest. Uses the blockstate's
+     * TYPE/FACING (the same data vanilla uses), so adjacent single chests never get paired.
+     */
+    public static BlockPos connectedHalf(net.minecraft.world.level.BlockGetter level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        if (!(state.getBlock() instanceof ChestBlock)
+                || !state.hasProperty(ChestBlock.TYPE) || !state.hasProperty(ChestBlock.FACING)) return null;
+        if (state.getValue(ChestBlock.TYPE) == net.minecraft.world.level.block.state.properties.ChestType.SINGLE) return null;
+        BlockPos other = pos.relative(ChestBlock.getConnectedDirection(state));
+        BlockState os = level.getBlockState(other);
+        if (os.getBlock() == state.getBlock() && os.hasProperty(ChestBlock.TYPE)
+                && os.getValue(ChestBlock.TYPE) != net.minecraft.world.level.block.state.properties.ChestType.SINGLE
+                && os.getValue(ChestBlock.FACING) == state.getValue(ChestBlock.FACING)) {
+            return other.immutable();
+        }
+        return null;
+    }
+
+    /** Removes and returns copies of every non-empty stack in the container, then clears it. */
+    public static List<ItemStack> extractAll(Container container) {
+        return extractAll(container, stack -> false);
+    }
+
+    /** Like {@link #extractAll(Container)}, but leaves any stack matched by {@code protect}
+     *  untouched in its original slot instead of extracting it. */
+    public static List<ItemStack> extractAll(Container container, java.util.function.Predicate<ItemStack> protect) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (stack.isEmpty() || protect.test(stack)) continue;
+            stacks.add(stack.copy());
+            container.setItem(i, ItemStack.EMPTY);
+        }
+        return stacks;
+    }
+
+    /**
+     * Attempts to insert as much of the stack as possible into the container
+     * (merging into existing matching stacks first, then empty slots).
+     * Returns the leftover ItemStack that did not fit (empty if it all fit).
+     */
+    public static ItemStack insertStack(Container container, ItemStack stack) {
+        ItemStack remaining = stack.copy();
+        if (remaining.isEmpty()) return ItemStack.EMPTY;
+
+        // Pass 1: top up existing matching, non-full stacks.
+        for (int i = 0; i < container.getContainerSize() && !remaining.isEmpty(); i++) {
+            ItemStack existing = container.getItem(i);
+            if (!existing.isEmpty() && ItemStack.isSameItemSameComponents(existing, remaining)) {
+                int space = existing.getMaxStackSize() - existing.getCount();
+                if (space > 0) {
+                    int move = Math.min(space, remaining.getCount());
+                    existing.grow(move);
+                    remaining.shrink(move);
+                }
+            }
+        }
+
+        // Pass 2: place into empty slots.
+        for (int i = 0; i < container.getContainerSize() && !remaining.isEmpty(); i++) {
+            if (container.getItem(i).isEmpty()) {
+                int move = Math.min(remaining.getMaxStackSize(), remaining.getCount());
+                ItemStack toPlace = remaining.copy();
+                toPlace.setCount(move);
+                container.setItem(i, toPlace);
+                remaining.shrink(move);
+            }
+        }
+
+        return remaining;
+    }
+
+    public static int freeCapacityEstimate(Container container) {
+        int free = 0;
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack s = container.getItem(i);
+            free += s.isEmpty() ? 64 : Math.max(0, s.getMaxStackSize() - s.getCount());
+        }
+        return free;
+    }
+}

@@ -152,16 +152,23 @@ public class ChestCatScreenButtons {
         List<Def> defs = new ArrayList<>();
         defs.add(new Def("S", "Sort inventory: " + modeTooltip(ChestCatClient.inventorySortMode),
                 () -> ChestCatActions.sortInventory(ChestCatClient.inventorySortMode, false)));
-        defs.add(new Def("M", "Choose how to sort (pick from a list - it sorts right away)",
+        defs.add(new Def("M", "Next sort mode",
+                () -> ChestCatClient.inventorySortMode = ChestCatClient.inventorySortMode.next()));
+        defs.add(new Def("L", "Pick sort mode from a list",
                 () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(screen, picked -> {
                     ChestCatClient.inventorySortMode = picked;
                     ChestCatActions.sortInventory(picked, false);
                 }))));
-        defs.add(new Def("O", "Settings (favorites, presets, hotbar...). Ctrl+drag any button to move this panel.",
-                () -> Minecraft.getInstance().setScreen(new SimpleSettingsScreen(screen))));
+        defs.add(new Def("O", "Sort options, favorites, ignore rules and the sort chain. Ctrl+drag any button to move this panel.",
+                () -> Minecraft.getInstance().setScreen(new SortSettingsScreen(screen))));
         defs.add(new Def("N", "Sort inventory + nearby chests", ChestCatActions::sortNearby));
         defs.add(new Def("Q", "Quick-stack matching items into nearby chests",
                 ChestCatActions::quickStack));
+        defs.add(new Def("F", "Favorites filter (" + (ClientUi.favoritesFilter ? "ON" : "OFF")
+                + "): dims every item that isn't a favorite so favorites stand out.",
+                ChestCatActions::toggleFavoritesFilter));
+        defs.add(new Def("R", "Presets and saved profiles (Combat, Building, Mining, ...)",
+                () -> Minecraft.getInstance().setScreen(new PresetPickerScreen(screen))));
         return defs;
     }
 
@@ -169,17 +176,24 @@ public class ChestCatScreenButtons {
         List<Def> defs = new ArrayList<>();
         defs.add(new Def("S", "Sort chest: " + modeTooltip(ChestCatClient.chestSortMode),
                 () -> ChestCatActions.sortContainer(ChestCatClient.chestSortMode, false)));
-        defs.add(new Def("M", "Choose how to sort (pick from a list - it sorts right away)",
+        defs.add(new Def("M", "Next sort mode",
+                () -> ChestCatClient.chestSortMode = ChestCatClient.chestSortMode.next()));
+        defs.add(new Def("L", "Pick sort mode from a list",
                 () -> Minecraft.getInstance().setScreen(new SortModePickerScreen(screen, picked -> {
                     ChestCatClient.chestSortMode = picked;
                     ChestCatActions.sortContainer(picked, false);
                 }))));
-        defs.add(new Def("O", "Settings (favorites, presets, hotbar...). Ctrl+drag any button to move this panel.",
-                () -> Minecraft.getInstance().setScreen(new SimpleSettingsScreen(screen))));
+        defs.add(new Def("O", "Sort options, favorites, ignore rules and the sort chain. Ctrl+drag any button to move this panel.",
+                () -> Minecraft.getInstance().setScreen(new SortSettingsScreen(screen))));
         defs.add(new Def("G", "Pull everything from this chest into your inventory",
                 () -> PacketDistributor.sendToServer(new DumpChestPayload())));
         defs.add(new Def("P", "Push your inventory into this chest",
                 () -> PacketDistributor.sendToServer(new SortIntoChestPayload())));
+        defs.add(new Def("F", "Favorites filter (" + (ClientUi.favoritesFilter ? "ON" : "OFF")
+                + "): dims every item that isn't a favorite so favorites stand out.",
+                ChestCatActions::toggleFavoritesFilter));
+        defs.add(new Def("R", "Presets and saved profiles (Combat, Building, Mining, ...)",
+                () -> Minecraft.getInstance().setScreen(new PresetPickerScreen(screen))));
         return defs;
     }
 
