@@ -217,8 +217,7 @@ public enum SortCategory {
 
         if (REDSTONE_ITEMS.contains(item) || path.contains("redstone")
                 || stack.is(ItemTags.WOODEN_BUTTONS) || stack.is(ItemTags.STONE_BUTTONS)
-                || stack.is(ItemTags.WOODEN_PRESSURE_PLATES)
-                || (item instanceof BlockItem plate && plate.getBlock() instanceof net.minecraft.world.level.block.BasePressurePlateBlock)
+                || stack.is(ItemTags.WOODEN_PRESSURE_PLATES) || stack.is(ItemTags.STONE_PRESSURE_PLATES)
                 || path.endsWith("_piston")) {
             return REDSTONE;
         }

@@ -1,0 +1,423 @@
+package net.chestcat;
+
+import net.chestcat.data.ChestCategoryData;
+import net.chestcat.data.ContainerRulesData;
+import net.chestcat.data.ProtectedItemsData;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
+
+import java.util.*;
+
+public final class ChestSorter {
+
+    private ChestSorter() {}
+
+    public record Result(int itemsMoved, int itemsDropped, int chestsTouched) {}
+
+    /** One proposed move, for /chestcat preview - never actually applied. */
+    public record ProposedMove(ItemStack stack, BlockPos destination, String reason) {}
+
+    /** Result of a dry run: what would move where, and what would be left over (dropped/unplaced). */
+    public record Preview(List<ProposedMove> moves, List<ItemStack> unplaced) {}
+
+    public static Result sortNearby(ServerPlayer player, int radius, ItemSortMode sortMode) {
+        ServerLevel level = player.serverLevel();
+        BlockPos center = player.blockPosition();
+        ChestCategoryData data = ChestCategoryData.get(level);
+        ContainerRulesData ruleData = ContainerRulesData.get(level);
+        ProtectedItemsData protectedItems = ProtectedItemsData.get(level);
+        SortLayoutPrefs.Settings layout = SortLayoutPrefs.get(player.getUUID());
+        GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
+        CustomGroups.refresh();
+
+        List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, center, radius);
+        // Whitelist mode overrides everything else: only whitelisted chests participate,
+        // full stop. Otherwise the normal per-chest exclude flag applies as before.
+        if (data.isWhitelistMode()) {
+            storages.removeIf(storage -> !data.isWhitelisted(storage.canonicalPos()));
+        } else {
+            storages.removeIf(storage -> data.isExcluded(storage.canonicalPos()));
+        }
+        if (storages.isEmpty()) {
+            return new Result(0, 0, 0);
+        }
+
+        // Rule-based chests (set via /chestcat rule set) opt entirely out of the
+        // category-key system below: they're matched - and ONLY matched - by their own
+        // ContainerRule, so a "Tools, diamond or netherite only" chest genuinely never
+        // sees anything the key/category system might otherwise have dumped into it.
+        Map<ChestUtil.Storage, ContainerRule> storageRule = new LinkedHashMap<>();
+        List<ChestUtil.Storage> keyBasedStorages = new ArrayList<>();
+        for (ChestUtil.Storage storage : storages) {
+            Optional<ContainerRule> rule = ruleData.getRule(storage.canonicalPos());
+            if (rule.isPresent()) {
+                storageRule.put(storage, rule.get());
+            } else {
+                keyBasedStorages.add(storage);
+            }
+        }
+
+        // Each key-based chest's key: its manual/locked-in assignment, else the dominant key of what's inside.
+        Map<ChestUtil.Storage, ItemGrouping.Key> storageKey = new LinkedHashMap<>();
+        for (ChestUtil.Storage storage : keyBasedStorages) {
+            Optional<ItemGrouping.Key> assigned = data.getKey(storage.canonicalPos());
+            ItemGrouping.Key key = assigned.orElseGet(() -> detectDominantKey(storage.container(), grouping));
+            storageKey.put(storage, key);
+            if (assigned.isEmpty()) {
+                data.setKey(storage.canonicalPos(), key);
+            }
+        }
+
+        List<Container> allContainersInOrder = new ArrayList<>();
+        for (ChestUtil.Storage storage : storages) {
+            allContainersInOrder.add(storage.container());
+        }
+        // The true last-resort pool for an item nothing else claimed: every key-based
+        // chest that was never explicitly /chestcat lock'd. A locked "Tools" chest, or any
+        // rule chest, must never absorb a random leftover item just because it has room -
+        // that's exactly the failure mode a "SmartSort" container is supposed to prevent.
+        List<Container> overflowContainers = new ArrayList<>();
+        for (ChestUtil.Storage storage : keyBasedStorages) {
+            if (!data.isLocked(storage.canonicalPos())) overflowContainers.add(storage.container());
+        }
+
+        // Protected item types are left exactly where they are - never pulled into the
+        // shared pool, so they can never be redistributed to a different chest.
+        List<ItemStack> pool = new ArrayList<>();
+        for (ChestUtil.Storage storage : storages) {
+            pool.addAll(ChestUtil.extractAll(storage.container(), protectedItems::isProtected));
+        }
+
+        // Identical stacks merge first, then everything is laid out in sort order, so the same items
+        // end up side by side even when a category spans several chests.
+        pool = mergeStacks(pool);
+        pool.sort(ItemSortUtils.comparator(sortMode, layout));
+
+        // Item types nothing could place (usually modded): ask the optional AI once, in the background.
+        if (AiClassifier.isEnabled()) {
+            Set<String> unknown = new LinkedHashSet<>();
+            for (ItemStack stack : pool) {
+                if (unknown.size() < 150 && ItemGrouping.needsAi(stack)) unknown.add(ItemGrouping.itemId(stack));
+            }
+            if (!unknown.isEmpty() && AiClassifier.classifyAsync(unknown, player)) {
+                player.sendSystemMessage(Component.literal("ChestCat AI is classifying " + unknown.size()
+                                + " unknown item type(s) in the background - sort again in a few seconds.")
+                        .withStyle(ChatFormatting.AQUA));
+            }
+        }
+
+        // Exact key (e.g. WOOD:oak, or plain WOOD) -> chests, plus every chest of a category regardless of sub-type.
+        Map<ItemGrouping.Key, List<Container>> byKey = new HashMap<>();
+        Map<ItemCategory, List<Container>> byCategory = new EnumMap<>(ItemCategory.class);
+        for (Map.Entry<ChestUtil.Storage, ItemGrouping.Key> entry : storageKey.entrySet()) {
+            Container container = entry.getKey().container();
+            byKey.computeIfAbsent(entry.getValue(), k -> new ArrayList<>()).add(container);
+            byCategory.computeIfAbsent(entry.getValue().category(), c -> new ArrayList<>()).add(container);
+        }
+
+        List<Map.Entry<ChestUtil.Storage, ContainerRule>> ruleEntries = new ArrayList<>(storageRule.entrySet());
+
+        int moved = 0;
+        int dropped = 0;
+
+        for (ItemStack stack : pool) {
+            int originalCount = stack.getCount();
+            ItemGrouping.Key key = ItemGrouping.classify(stack, grouping);
+            ItemGrouping.Key custom = ItemGrouping.customKey(stack);
+
+            ItemStack remaining = stack;
+
+            // Rule chests get first claim, checked in listed order. A chest's rule either
+            // matches or it doesn't - there is no partial/fallback acceptance, so an item
+            // that fails every rule here is never routed into a rule chest at all.
+            for (Map.Entry<ChestUtil.Storage, ContainerRule> entry : ruleEntries) {
+                if (remaining.isEmpty()) break;
+                if (entry.getValue().matches(remaining, grouping)) {
+                    remaining = ChestUtil.insertStack(entry.getKey().container(), remaining);
+                }
+            }
+
+            // A chest pointed at this item's custom group wins; otherwise the normal category chain.
+            if (!remaining.isEmpty() && custom != null) {
+                remaining = insertInto(remaining, byKey.get(custom));
+            }
+            // Most specific chest first, then progressively looser fallbacks.
+            if (!remaining.isEmpty()) {
+                remaining = insertInto(remaining, byKey.get(key));
+            }
+            if (!remaining.isEmpty() && key.subKey() != null) {
+                remaining = insertInto(remaining, byKey.get(new ItemGrouping.Key(key.category(), null)));
+            }
+            if (!remaining.isEmpty()) {
+                remaining = insertInto(remaining, byCategory.get(key.category()));
+            }
+            if (!remaining.isEmpty()) {
+                remaining = insertInto(remaining, byCategory.get(ItemCategory.MISC));
+            }
+            if (!remaining.isEmpty()) {
+                // Restricted, not "allContainersInOrder": locked chests and rule chests are
+                // excluded, so they never become a dumping ground for unrelated leftovers.
+                remaining = insertInto(remaining, overflowContainers);
+            }
+
+            int leftover = remaining.isEmpty() ? 0 : remaining.getCount();
+            moved += originalCount - leftover;
+
+            if (!remaining.isEmpty()) {
+                dropped += leftover;
+                player.drop(remaining, false);
+            }
+        }
+
+        for (Container c : allContainersInOrder) {
+            sortContainerContents(c, sortMode, layout, protectedItems::isProtected);
+        }
+
+        return new Result(moved, dropped, storages.size());
+    }
+
+    /** Combines partial stacks of the same item (same components) up to the max stack size. */
+    private static List<ItemStack> mergeStacks(List<ItemStack> stacks) {
+        List<ItemStack> merged = new ArrayList<>();
+        outer:
+        for (ItemStack stack : stacks) {
+            for (ItemStack existing : merged) {
+                if (ItemStack.isSameItemSameComponents(existing, stack)
+                        && existing.getCount() < existing.getMaxStackSize()) {
+                    int move = Math.min(existing.getMaxStackSize() - existing.getCount(), stack.getCount());
+                    existing.grow(move);
+                    stack.shrink(move);
+                    if (stack.isEmpty()) continue outer;
+                }
+            }
+            merged.add(stack);
+        }
+        return merged;
+    }
+
+    private static ItemStack insertInto(ItemStack stack, List<Container> targets) {
+        if (targets == null || targets.isEmpty() || stack.isEmpty()) return stack;
+        ItemStack remaining = stack;
+        for (Container target : targets) {
+            if (remaining.isEmpty()) break;
+            remaining = ChestUtil.insertStack(target, remaining);
+        }
+        return remaining;
+    }
+
+    public static void sortContainer(Container container, ItemSortMode mode) {
+        sortContainerContents(container, mode, SortLayoutPrefs.Settings.DEFAULT, stack -> false);
+    }
+
+    public static void sortContainer(Container container, ItemSortMode mode, ServerPlayer player) {
+        sortContainerContents(container, mode, SortLayoutPrefs.get(player.getUUID()),
+                ProtectedItemsData.get(player.serverLevel())::isProtected);
+    }
+
+    private static void sortContainerContents(Container container, ItemSortMode mode,
+                                              SortLayoutPrefs.Settings layout,
+                                              java.util.function.Predicate<ItemStack> protect) {
+        int size = container.getContainerSize();
+        if (size == 0) return;
+
+        // A protected stack is left in its slot entirely - never picked up, so it
+        // can't be reordered or moved even within the same container.
+        List<ItemStack> items = new ArrayList<>();
+        boolean[] protectedSlot = new boolean[size];
+        for (int i = 0; i < size; i++) {
+            ItemStack s = container.getItem(i);
+            if (s.isEmpty()) continue;
+            if (protect.test(s)) {
+                protectedSlot[i] = true;
+                continue;
+            }
+            items.add(s.copy());
+            container.setItem(i, ItemStack.EMPTY);
+        }
+
+        items = mergeStacks(items);
+        items.sort(ItemSortUtils.comparator(mode, layout));
+
+        int cols = (size % 9 == 0) ? 9 : size;
+        int rows = size / cols;
+        int[][] grid = new int[rows][cols];
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                int slot = r * cols + c;
+                grid[r][c] = protectedSlot[slot] ? -1 : slot;
+            }
+        }
+
+        List<Integer> order = SortGrid.fillOrder(grid, layout.layout(), layout.reverse());
+        for (int i = 0; i < items.size() && i < order.size(); i++) {
+            container.setItem(order.get(i), items.get(i));
+        }
+    }
+
+    /** Dominant key (category + sub-type, when splitting is on) of what's currently in the container. */
+    public static ItemGrouping.Key detectDominantKey(Container container, GroupingConfig.Settings grouping) {
+        Map<ItemGrouping.Key, Integer> counts = new LinkedHashMap<>();
+        for (int i = 0; i < container.getContainerSize(); i++) {
+            ItemStack stack = container.getItem(i);
+            if (stack.isEmpty()) continue;
+            counts.merge(ItemGrouping.classify(stack, grouping), stack.getCount(), Integer::sum);
+        }
+        return counts.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(new ItemGrouping.Key(ItemCategory.MISC, null));
+    }
+
+    public static ItemCategory detectDominantCategory(Container container) {
+        return detectDominantKey(container, GroupingConfig.Settings.DEFAULT).category();
+    }
+
+    /**
+     * Computes what sortNearby WOULD do, without moving, extracting, or clearing a single
+     * item from a single container - purely a read of current contents plus the same
+     * routing decisions sortNearby makes. Capacity is an estimate (see
+     * ChestUtil#freeCapacityEstimate): good enough to warn about items with no viable
+     * destination, but the exact final slot layout can differ slightly once merging
+     * against existing partial stacks is actually performed by the real sort.
+     */
+    public static Preview previewNearby(ServerPlayer player, int radius, ItemSortMode sortMode) {
+        ServerLevel level = player.serverLevel();
+        BlockPos center = player.blockPosition();
+        ChestCategoryData data = ChestCategoryData.get(level);
+        ContainerRulesData ruleData = ContainerRulesData.get(level);
+        ProtectedItemsData protectedItems = ProtectedItemsData.get(level);
+        GroupingConfig.Settings grouping = GroupingConfig.get(player.getUUID());
+        CustomGroups.refresh();
+
+        List<ChestUtil.Storage> storages = ChestUtil.findNearbyStorages(level, center, radius);
+        if (data.isWhitelistMode()) {
+            storages.removeIf(storage -> !data.isWhitelisted(storage.canonicalPos()));
+        } else {
+            storages.removeIf(storage -> data.isExcluded(storage.canonicalPos()));
+        }
+        if (storages.isEmpty()) {
+            return new Preview(List.of(), List.of());
+        }
+
+        Map<ChestUtil.Storage, ContainerRule> storageRule = new LinkedHashMap<>();
+        List<ChestUtil.Storage> keyBasedStorages = new ArrayList<>();
+        for (ChestUtil.Storage storage : storages) {
+            Optional<ContainerRule> rule = ruleData.getRule(storage.canonicalPos());
+            if (rule.isPresent()) storageRule.put(storage, rule.get());
+            else keyBasedStorages.add(storage);
+        }
+
+        Map<ChestUtil.Storage, ItemGrouping.Key> storageKey = new LinkedHashMap<>();
+        for (ChestUtil.Storage storage : keyBasedStorages) {
+            ItemGrouping.Key key = data.getKey(storage.canonicalPos())
+                    .orElseGet(() -> detectDominantKey(storage.container(), grouping));
+            storageKey.put(storage, key);
+        }
+
+        Map<ItemGrouping.Key, List<ChestUtil.Storage>> byKey = new HashMap<>();
+        Map<ItemCategory, List<ChestUtil.Storage>> byCategory = new EnumMap<>(ItemCategory.class);
+        for (Map.Entry<ChestUtil.Storage, ItemGrouping.Key> entry : storageKey.entrySet()) {
+            byKey.computeIfAbsent(entry.getValue(), k -> new ArrayList<>()).add(entry.getKey());
+            byCategory.computeIfAbsent(entry.getValue().category(), c -> new ArrayList<>()).add(entry.getKey());
+        }
+
+        Map<ChestUtil.Storage, Integer> freeSpace = new LinkedHashMap<>();
+        for (ChestUtil.Storage storage : storages) {
+            freeSpace.put(storage, ChestUtil.freeCapacityEstimate(storage.container()));
+        }
+        List<ChestUtil.Storage> unlockedOverflow = new ArrayList<>();
+        for (ChestUtil.Storage storage : keyBasedStorages) {
+            if (!data.isLocked(storage.canonicalPos())) unlockedOverflow.add(storage);
+        }
+
+        List<ItemStack> pool = new ArrayList<>();
+        for (ChestUtil.Storage storage : storages) {
+            for (int i = 0; i < storage.container().getContainerSize(); i++) {
+                ItemStack s = storage.container().getItem(i);
+                if (!s.isEmpty() && !protectedItems.isProtected(s)) pool.add(s.copy());
+            }
+        }
+        pool.sort(ItemSortUtils.comparator(sortMode));
+
+        List<ProposedMove> moves = new ArrayList<>();
+        List<ItemStack> unplaced = new ArrayList<>();
+
+        for (ItemStack stack : pool) {
+            ItemGrouping.Key key = ItemGrouping.classify(stack, grouping);
+            ItemGrouping.Key custom = ItemGrouping.customKey(stack);
+            ChestUtil.Storage target = null;
+            String reason = null;
+
+            for (Map.Entry<ChestUtil.Storage, ContainerRule> entry : storageRule.entrySet()) {
+                if (entry.getValue().matches(stack, grouping) && freeSpace.get(entry.getKey()) > 0) {
+                    target = entry.getKey();
+                    reason = "rule: " + entry.getValue().describe();
+                    break;
+                }
+            }
+            if (target == null && custom != null) {
+                target = firstWithSpace(byKey.get(custom), freeSpace);
+                if (target != null) reason = "custom group " + custom.displayName();
+            }
+            if (target == null) {
+                target = firstWithSpace(byKey.get(key), freeSpace);
+                if (target != null) reason = "assigned " + key.displayName();
+            }
+            if (target == null && key.subKey() != null) {
+                target = firstWithSpace(byKey.get(new ItemGrouping.Key(key.category(), null)), freeSpace);
+                if (target != null) reason = "assigned " + key.category().getDisplayName();
+            }
+            if (target == null) {
+                target = firstWithSpace(byCategory.get(key.category()), freeSpace);
+                if (target != null) reason = "category " + key.category().getDisplayName();
+            }
+            if (target == null) {
+                target = firstWithSpace(byCategory.get(ItemCategory.MISC), freeSpace);
+                if (target != null) reason = "misc fallback";
+            }
+            if (target == null) {
+                target = firstWithSpace(unlockedOverflow, freeSpace);
+                if (target != null) reason = "overflow (no locked/rule chest touched)";
+            }
+
+            if (target == null) {
+                unplaced.add(stack);
+            } else {
+                moves.add(new ProposedMove(stack, target.canonicalPos(), reason));
+                freeSpace.merge(target, -Math.max(1, Math.min(stack.getCount(), 64)), Integer::sum);
+            }
+        }
+
+        return new Preview(moves, unplaced);
+    }
+
+    private static ChestUtil.Storage firstWithSpace(List<ChestUtil.Storage> candidates, Map<ChestUtil.Storage, Integer> freeSpace) {
+        if (candidates == null) return null;
+        for (ChestUtil.Storage s : candidates) {
+            if (freeSpace.getOrDefault(s, 0) > 0) return s;
+        }
+        return null;
+    }
+
+    /** Full classification breakdown for one stack, for /chestcat debug. Doesn't touch any container. */
+    public static String explain(ItemStack stack, GroupingConfig.Settings grouping) {
+        if (stack.isEmpty()) return "Empty hand - hold an item and try again.";
+        ItemGrouping.Key key = ItemGrouping.classify(stack, grouping);
+        ItemGrouping.Key custom = ItemGrouping.customKey(stack);
+        StringBuilder sb = new StringBuilder();
+        sb.append(stack.getHoverName().getString()).append('\n');
+        sb.append("  Item ID: ").append(ItemMeta.itemId(stack)).append('\n');
+        sb.append("  Mod: ").append(ItemMeta.modId(stack)).append('\n');
+        sb.append("  Category: ").append(key.category().getDisplayName())
+                .append(key.subKey() != null ? " (" + key.subKey() + ")" : "").append('\n');
+        sb.append("  Tool type: ").append(ItemMeta.toolType(stack)).append('\n');
+        sb.append("  Material tier: ").append(ItemMeta.materialTier(stack)).append('\n');
+        sb.append("  Custom group: ").append(custom != null ? custom.displayName() : "(none)");
+        return sb.toString();
+    }
+}

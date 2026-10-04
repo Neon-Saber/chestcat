@@ -1,0 +1,191 @@
+package net.chestcat;
+
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.item.*;
+
+import java.util.List;
+
+/**
+ * The set of storage categories a chest can be assigned to, and the logic
+ * used to guess an ItemStack's category when auto-detecting.
+ *
+ * Order matters slightly for display purposes only; detection uses explicit
+ * checks below, not enum order.
+ */
+public enum ItemCategory {
+    TOOLS("Tools"),
+    WEAPONS("Weapons"),
+    ARMOR("Armor"),
+    FOOD("Food"),
+    ORES_AND_INGOTS("Ores & Ingots"),
+    REDSTONE("Redstone"),
+    POTIONS_AND_BREWING("Potions & Brewing"),
+    DYES_AND_DECORATION("Dyes & Decoration"),
+    WOOD("Wood"),
+    STONE_AND_DEEPSLATE("Stone & Deepslate"),
+    BLOCKS("Blocks"),
+    MISC("Misc"),
+    /** A group defined in config/chestcat/groups.json; the group name is the sub-key. Never returned by categorize(). */
+    CUSTOM("Custom Group");
+
+    /**
+     * The families a stone/deepslate block can belong to, in match order (first hit wins,
+     * checked with String.contains on the registry path). Longer names must come before
+     * "stone" so cobblestone / blackstone don't get swallowed by it.
+     */
+    public static final List<String> STONE_FAMILY_ORDER = List.of(
+            "deepslate", "cobblestone", "blackstone", "stone",
+            "andesite", "diorite", "granite", "tuff"
+    );
+
+    // Paths that contain "stone" but are not part of the stone family.
+    private static final List<String> STONE_EXCLUDED = List.of(
+            "sandstone", "end_stone", "redstone", "lodestone",
+            "glowstone", "grindstone", "stonecutter", "dripstone"
+    );
+
+    // Tags most mods use for processed / raw materials, so modded ores, ingots, gems, dusts,
+    // plates and gears land with the vanilla ones instead of falling through to Blocks/Misc.
+    private static final List<TagKey<Item>> MATERIAL_TAGS = List.of(
+            commonTag("ores"), commonTag("raw_materials"), commonTag("ingots"), commonTag("nuggets"),
+            commonTag("gems"), commonTag("dusts"), commonTag("plates"), commonTag("gears")
+    );
+
+    private static TagKey<Item> commonTag(String path) {
+        return TagKey.create(Registries.ITEM, ResourceLocation.fromNamespaceAndPath("c", path));
+    }
+
+    private final String displayName;
+
+    ItemCategory(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    /**
+     * The broader category to fall back to when this category has no dedicated chest.
+     * E.g. stone with no "Stone & Deepslate" chest around goes to the "Blocks" chest,
+     * and a sword with no "Weapons" chest goes to the "Tools" chest - each specific
+     * category still gets first pick of its own chest; this is only the next rung down
+     * before ever being treated as unclassifiable overflow. Returns null when a category
+     * has no sensible broader home to fall back to (e.g. Food, Armor, Misc itself).
+     */
+    public static ItemCategory broadFallback(ItemCategory category) {
+        return switch (category) {
+            case STONE_AND_DEEPSLATE, WOOD, REDSTONE, DYES_AND_DECORATION, ORES_AND_INGOTS -> BLOCKS;
+            case WEAPONS -> TOOLS;
+            default -> null;
+        };
+    }
+
+    /**
+     * Best-effort classification of an ItemStack into a single category.
+     * Uses vanilla item classes and tags first (cheap, reliable), falls back
+     * to MISC when nothing matches.
+     */
+    public static ItemCategory categorize(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return MISC;
+        Item item = stack.getItem();
+
+        if (item instanceof TieredItem || item instanceof DiggerItem
+                || item instanceof ShearsItem || item instanceof FishingRodItem
+                || item instanceof FlintAndSteelItem || item instanceof HoeItem) {
+            if (item instanceof SwordItem) return WEAPONS;
+            return TOOLS;
+        }
+
+        if (item instanceof SwordItem || item instanceof BowItem
+                || item instanceof CrossbowItem || item instanceof TridentItem
+                || item instanceof MaceItem || item instanceof ShieldItem) {
+            return WEAPONS;
+        }
+
+        if (item instanceof ArmorItem || item instanceof ElytraItem) {
+            return ARMOR;
+        }
+
+        if (stack.getFoodProperties(null) != null || stack.is(ItemTags.MEAT)
+                || stack.is(ItemTags.FISHES)) {
+            return FOOD;
+        }
+
+        if (item instanceof PotionItem || item instanceof SplashPotionItem
+                || item instanceof LingeringPotionItem
+                || stack.is(Items.BLAZE_POWDER)
+                || item == Items.BREWING_STAND || item == Items.CAULDRON
+                || item == Items.GLASS_BOTTLE || item == Items.NETHER_WART) {
+            return POTIONS_AND_BREWING;
+        }
+
+        if (stack.is(ItemTags.DYEABLE) || item instanceof DyeItem
+                || stack.is(ItemTags.BANNERS) || item == Items.PAINTING
+                || item == Items.ITEM_FRAME || item == Items.FLOWER_POT) {
+            return DYES_AND_DECORATION;
+        }
+
+        if (item == Items.REDSTONE || item == Items.REDSTONE_TORCH
+                || item == Items.REPEATER || item == Items.COMPARATOR
+                || item == Items.PISTON || item == Items.STICKY_PISTON
+                || item == Items.OBSERVER || item == Items.HOPPER
+                || item == Items.DISPENSER || item == Items.DROPPER
+                || item == Items.TARGET || item == Items.LEVER
+                || item == Items.REDSTONE_LAMP || item == Items.REDSTONE_BLOCK
+                || item == Items.TRIPWIRE_HOOK || item == Items.DAYLIGHT_DETECTOR) {
+            return REDSTONE;
+        }
+
+        if (isOreOrIngot(item)) {
+            return ORES_AND_INGOTS;
+        }
+
+        for (TagKey<Item> materialTag : MATERIAL_TAGS) {
+            if (stack.is(materialTag)) return ORES_AND_INGOTS;
+        }
+
+        if (stack.is(ItemTags.LOGS) || stack.is(ItemTags.PLANKS)
+                || stack.is(ItemTags.WOODEN_SLABS) || stack.is(ItemTags.WOODEN_STAIRS)
+                || stack.is(ItemTags.WOODEN_FENCES) || stack.is(ItemTags.WOODEN_DOORS)
+                || stack.is(ItemTags.WOODEN_TRAPDOORS) || stack.is(ItemTags.SAPLINGS)) {
+            return WOOD;
+        }
+
+        if (item instanceof BlockItem && isStoneOrDeepslate(item)) {
+            return STONE_AND_DEEPSLATE;
+        }
+
+        if (item instanceof BlockItem) {
+            return BLOCKS;
+        }
+
+        return MISC;
+    }
+
+    private static boolean isStoneOrDeepslate(Item item) {
+        String name = BuiltInRegistries.ITEM.getKey(item).getPath();
+        for (String excluded : STONE_EXCLUDED) {
+            if (name.contains(excluded)) return false;
+        }
+        for (String family : STONE_FAMILY_ORDER) {
+            if (name.contains(family)) return true;
+        }
+        return false;
+    }
+
+    private static boolean isOreOrIngot(Item item) {
+        String name = BuiltInRegistries.ITEM.getKey(item).getPath();
+        return name.endsWith("_ore") || name.endsWith("_ingot")
+                || name.endsWith("_nugget") || name.equals("raw_iron")
+                || name.equals("raw_gold") || name.equals("raw_copper")
+                || name.equals("coal") || name.equals("charcoal")
+                || name.equals("diamond") || name.equals("emerald")
+                || name.equals("lapis_lazuli") || name.equals("quartz")
+                || name.equals("netherite_scrap") || name.equals("netherite_ingot");
+    }
+}
