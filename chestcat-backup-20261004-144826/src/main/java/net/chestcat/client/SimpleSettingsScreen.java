@@ -102,20 +102,14 @@ public class SimpleSettingsScreen extends Screen {
                 .build());
         y += step + 6;
 
-        int third = (w - 4) / 3;
         this.addRenderableWidget(Button.builder(Component.literal("More settings..."),
                         b -> this.minecraft.setScreen(new SortSettingsScreen(this)))
-                .bounds(this.width / 2 - w / 2, y, third + 20, 20)
+                .bounds(this.width / 2 - w / 2, y, w / 2 - 2, 20)
                 .tooltip(Tooltip.create(Component.literal(
                         "Sort chain, ignore rules, hotbar details, look and sounds, saved profiles.")))
                 .build());
-        this.addRenderableWidget(Button.builder(Component.literal("What's new"),
-                        b -> UpdateLog.open(this))
-                .bounds(this.width / 2 - w / 2 + third + 22, y, third - 4, 20)
-                .tooltip(Tooltip.create(Component.literal("See what changed in each ChestCat version.")))
-                .build());
         this.addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.minecraft.setScreen(parent))
-                .bounds(this.width / 2 - w / 2 + 2 * third + 20, y, w - (2 * third + 20), 20).build());
+                .bounds(this.width / 2 + 2, y, w / 2 - 2, 20).build());
     }
 
     @Override

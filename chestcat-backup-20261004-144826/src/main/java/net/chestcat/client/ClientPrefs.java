@@ -48,17 +48,12 @@ public final class ClientPrefs {
     private static boolean loaded = false;
     /** Set on world join; the next tick pushes settings to the server so every sort path (keybind, C menu, commands) uses them. */
     private static boolean pendingLoginSync = false;
-    /** Set on world join; the next tick shows the update log if this version hasn't been shown yet. */
-    private static boolean pendingUpdateLog = false;
-    /** The last changelog version the player was shown (saved, so the popup appears once per update). */
-    static String lastSeenVersion = "";
 
     private ClientPrefs() {}
 
     /** Everything that gets written. Field defaults are what a missing key falls back to. */
     private static final class Data {
         int version = 1;
-        String lastSeenVersion = "";
 
         // sorting
         String layout = SortLayout.ROWS.name();
@@ -125,7 +120,6 @@ public final class ClientPrefs {
         d.favoriteMode = SortSettings.favoriteMode.name();
         d.mergeStacks = SortSettings.mergeStacks;
         d.exclusions = new ArrayList<>(SortSettings.exclusions);
-        d.lastSeenVersion = lastSeenVersion;
         SortMore m = SortSettings.more;
         d.emptySlots = m.emptySlots().name();
         d.hotbarSeparate = m.hotbarSeparate();
@@ -225,7 +219,6 @@ public final class ClientPrefs {
     }
 
     private static void applyUi(Data d) {
-        lastSeenVersion = d.lastSeenVersion == null ? "" : d.lastSeenVersion;
         ChestCatIndicatorRenderer.enabled = d.floatingIcons;
         ClientUi.preset = enumOr(d.guiPreset, ClientUi.GuiPreset.class, ClientUi.GuiPreset.DEFAULT);
         ClientUi.offsetX = d.guiOffsetX;
@@ -296,15 +289,9 @@ public final class ClientPrefs {
 
     @SubscribeEvent
     public static void onClientTick(ClientTickEvent.Post event) {
-        net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
-        if (pendingLoginSync && mc.player != null) {
+        if (pendingLoginSync && net.minecraft.client.Minecraft.getInstance().player != null) {
             pendingLoginSync = false;
             SortSettings.sync();
-        }
-        // Wait for a moment with no other screen open (the world has to be fully loaded first).
-        if (pendingUpdateLog && mc.player != null && mc.screen == null) {
-            pendingUpdateLog = false;
-            UpdateLog.showIfNew();
         }
         if (++timer < CHECK_INTERVAL_TICKS) return;
         timer = 0;
@@ -314,7 +301,6 @@ public final class ClientPrefs {
     @SubscribeEvent
     public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
         pendingLoginSync = true;
-        pendingUpdateLog = true;
     }
 
     @SubscribeEvent
