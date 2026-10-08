@@ -235,8 +235,8 @@ public class NetworkHandler {
             int changed = InventorySorter.sortMainInventory(player, payload.sortMode());
             if (payload.quiet()) return;
             player.displayClientMessage(changed == 0
-                    ? Component.literal("Inventory already sorted.").withStyle(ChatFormatting.GRAY)
-                    : Component.literal("Inventory sorted (" + changed + " slots rearranged).").withStyle(ChatFormatting.GREEN), true);
+                    ? Component.literal("\u2713 Already in order").withStyle(ChatFormatting.GRAY)
+                    : Component.literal("\u2713 Inventory sorted").withStyle(ChatFormatting.GREEN), true);
         });
     }
 
@@ -244,14 +244,20 @@ public class NetworkHandler {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
             AbstractContainerMenu menu = player.containerMenu;
-            if (menu == null || menu == player.inventoryMenu) return;
+            if (menu == null || menu == player.inventoryMenu) {
+                if (!payload.quiet()) {
+                    player.displayClientMessage(Component.literal("\u26A0 Couldn't sort this container")
+                            .withStyle(ChatFormatting.YELLOW), true);
+                }
+                return;
+            }
 
             // "menu:" ignore rules: a whole container type the player never wants sorted.
             String menuId = MenuSorting.menuId(menu);
             SortLayoutPrefs.Settings prefs = SortLayoutPrefs.get(player.getUUID());
             if (ExclusionRules.parse(prefs.exclusions()).matchesMenu(menuId)) {
                 if (!payload.quiet()) {
-                    player.displayClientMessage(Component.literal("This container type is on your ignore list.")
+                    player.displayClientMessage(Component.literal("\u26A0 This container type is on your ignore list")
                             .withStyle(ChatFormatting.YELLOW), true);
                 }
                 return;
@@ -265,13 +271,19 @@ public class NetworkHandler {
                 // Shulker boxes, hoppers, dispensers and modded storage: any menu whose non-player slots all
                 // take ordinary items is sorted through its slots, so no per-mod support is needed.
                 java.util.List<net.minecraft.world.inventory.Slot> slots = MenuSorting.storageSlots(menu, player);
-                if (slots.isEmpty()) return;
+                if (slots.isEmpty()) {
+                    if (!payload.quiet()) {
+                        player.displayClientMessage(Component.literal("\u26A0 Couldn't sort this container")
+                                .withStyle(ChatFormatting.YELLOW), true);
+                    }
+                    return;
+                }
                 changed = ChestSorter.sortContainer(MenuSorting.view(slots), payload.sortMode(), player);
             }
             if (!payload.quiet()) {
                 player.displayClientMessage(changed == 0
-                        ? Component.literal("Container already sorted.").withStyle(ChatFormatting.GRAY)
-                        : Component.literal("Container sorted (" + changed + " slots rearranged).").withStyle(ChatFormatting.GREEN), true);
+                        ? Component.literal("\u2713 Already in order").withStyle(ChatFormatting.GRAY)
+                        : Component.literal("\u2713 Chest sorted").withStyle(ChatFormatting.GREEN), true);
             }
         });
     }

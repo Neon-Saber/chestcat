@@ -50,6 +50,8 @@ public final class ClientPrefs {
     private static boolean pendingLoginSync = false;
     /** Set on world join; the next tick shows the update log if this version hasn't been shown yet. */
     private static boolean pendingUpdateLog = false;
+    /** Set on world join; the next tick warns once if ChestCat is running on a version it wasn't built for. */
+    private static boolean pendingCompatCheck = false;
     /** The last changelog version the player was shown (saved, so the popup appears once per update). */
     static String lastSeenVersion = "";
 
@@ -301,6 +303,14 @@ public final class ClientPrefs {
             pendingLoginSync = false;
             SortSettings.sync();
         }
+        if (pendingCompatCheck && mc.player != null) {
+            pendingCompatCheck = false;
+            for (String problem : net.chestcat.CompatInfo.get().problems()) {
+                mc.player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                        "\u26A0 ChestCat: " + problem + " (Details: ChestCat menu > More options > About)")
+                        .withStyle(net.minecraft.ChatFormatting.YELLOW), false);
+            }
+        }
         // Wait for a moment with no other screen open (the world has to be fully loaded first).
         if (pendingUpdateLog && mc.player != null && mc.screen == null) {
             pendingUpdateLog = false;
@@ -315,6 +325,7 @@ public final class ClientPrefs {
     public static void onLoggingIn(ClientPlayerNetworkEvent.LoggingIn event) {
         pendingLoginSync = true;
         pendingUpdateLog = true;
+        pendingCompatCheck = true;
     }
 
     @SubscribeEvent

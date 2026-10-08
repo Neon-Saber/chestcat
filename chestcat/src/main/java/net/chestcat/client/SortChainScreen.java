@@ -27,7 +27,7 @@ public class SortChainScreen extends Screen {
     private final List<SortChain.Entry> working;
 
     public SortChainScreen(Screen parent) {
-        super(Component.literal("Sort Chain"));
+        super(Component.literal("Build Your Own Order"));
         this.parent = parent;
         this.working = new ArrayList<>(SortChain.parse(SortSettings.chain).entries());
     }
@@ -85,17 +85,17 @@ public class SortChainScreen extends Screen {
             down.active = i < working.size() - 1;
             this.addRenderableWidget(down);
 
-            this.addRenderableWidget(Button.builder(Component.literal((i + 1) + ". " + name), b -> cycleKey(index))
+            this.addRenderableWidget(Button.builder(Component.literal((i == 0 ? "Sort by: " : "Then by: ") + name), b -> cycleKey(index))
                     .bounds(x + 44, y, 122, 20)
                     .tooltip(Tooltip.create(Component.literal(
                             (key == null ? "" : key.description() + " ") + "Click to pick a different rule.")))
                     .build());
 
             boolean reversed = key != null && entry.descending() != key.defaultDescending();
-            this.addRenderableWidget(Button.builder(Component.literal(reversed ? "Reversed" : "Normal"),
+            this.addRenderableWidget(Button.builder(Component.literal(reversed ? "Flipped" : "Normal"),
                             b -> flip(index))
                     .bounds(x + 168, y, 56, 20)
-                    .tooltip(Tooltip.create(Component.literal("Flip this rule's direction.")))
+                    .tooltip(Tooltip.create(Component.literal("Flip the direction of this step: A \u2192 Z becomes Z \u2192 A, and low-to-high becomes high-to-low.")))
                     .build());
 
             this.addRenderableWidget(Button.builder(Component.literal("x"), b -> remove(index))
@@ -104,11 +104,11 @@ public class SortChainScreen extends Screen {
         }
 
         y += 4;
-        Button add = Button.builder(Component.literal("+ Add rule"), b -> addRule())
+        Button add = Button.builder(Component.literal("+ Then sort by..."), b -> addRule())
                 .bounds(x, y, 122, 20).build();
         add.active = working.size() < SortChain.MAX_ENTRIES;
         this.addRenderableWidget(add);
-        this.addRenderableWidget(Button.builder(Component.literal("Reset to default"), b -> {
+        this.addRenderableWidget(Button.builder(Component.literal("Start over"), b -> {
                     working.clear();
                     working.addAll(SortChain.defaultChain().entries());
                     commit();

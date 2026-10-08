@@ -157,8 +157,8 @@ public class ChestCatScreenButtons {
                     ChestCatClient.inventorySortMode = picked;
                     ChestCatActions.sortInventory(picked, false);
                 }))));
-        defs.add(new Def("O", "Settings (favorites, presets, hotbar...). Ctrl+drag any button to move this panel.",
-                () -> Minecraft.getInstance().setScreen(new SimpleSettingsScreen(screen))));
+        defs.add(new Def("O", "ChestCat menu: sort style, favorites, settings. Ctrl+drag any button to move this panel.",
+                () -> Minecraft.getInstance().setScreen(new ChestCatHomeScreen(screen))));
         defs.add(new Def("N", "Sort inventory + nearby chests", ChestCatActions::sortNearby));
         defs.add(new Def("Q", "Quick-stack matching items into nearby chests",
                 ChestCatActions::quickStack));
@@ -174,8 +174,8 @@ public class ChestCatScreenButtons {
                     ChestCatClient.chestSortMode = picked;
                     ChestCatActions.sortContainer(picked, false);
                 }))));
-        defs.add(new Def("O", "Settings (favorites, presets, hotbar...). Ctrl+drag any button to move this panel.",
-                () -> Minecraft.getInstance().setScreen(new SimpleSettingsScreen(screen))));
+        defs.add(new Def("O", "ChestCat menu: sort style, favorites, settings. Ctrl+drag any button to move this panel.",
+                () -> Minecraft.getInstance().setScreen(new ChestCatHomeScreen(screen))));
         defs.add(new Def("G", "Pull everything from this chest into your inventory",
                 () -> PacketDistributor.sendToServer(new DumpChestPayload())));
         defs.add(new Def("P", "Push your inventory into this chest",

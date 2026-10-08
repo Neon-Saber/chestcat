@@ -98,13 +98,18 @@ public final class ChestCatActions {
     }
 
     public static void openSettings(Screen parent) {
-        Minecraft.getInstance().setScreen(new SimpleSettingsScreen(parent));
+        Minecraft.getInstance().setScreen(new ChestCatHomeScreen(parent));
     }
 
     /** Applies the next built-in preset. */
     public static void cyclePreset() {
         SortPresets.Preset p = SortPresets.cycle();
         actionBar("ChestCat preset: " + p.name());
+    }
+
+    public static void actionBar(String text, net.minecraft.ChatFormatting color) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null) mc.player.displayClientMessage(Component.literal(text).withStyle(color), true);
     }
 
     public static void actionBar(String text) {

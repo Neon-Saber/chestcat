@@ -1,15 +1,14 @@
 {
   "key.categories.chestcat": "ChestCat",
   "key.chestcat.open_menu": "Open Nearby Chests Menu",
-  "key.chestcat.sort_inventory": "Sort My Inventory",
   "key.chestcat.assign_category": "Assign Chest Category",
   "key.chestcat.assign_category_modifier": "Assign Chest Category - Hold Modifier",
   "key.chestcat.favorite_item": "Favorite / Unfavorite Hovered Item",
-  "key.chestcat.sort_container": "Sort Open Container",
-  "key.chestcat.sort_nearby": "Sort Inventory + Nearby Chests",
-  "key.chestcat.quick_stack": "Quick Stack to Nearby Chests",
-  "key.chestcat.cycle_mode": "Next Sort Mode",
-  "key.chestcat.next_preset": "Next Sort Preset",
-  "key.chestcat.open_settings": "Open Sort Options",
-  "key.chestcat.favorites_filter": "Toggle Favorites Filter"
+  "key.chestcat.open_settings": "Open ChestCat Settings",
+  "key.chestcat.sort": "Sort (open chest or inventory - Shift sorts inventory)",
+  "key.chestcat.sort_nearby_chests": "Sort Inventory + Nearby Chests",
+  "key.chestcat.quick_stack_items": "Quick Stack to Nearby Chests",
+  "key.chestcat.next_sort_mode": "Next Sort Mode",
+  "key.chestcat.next_sort_preset": "Next Sort Preset",
+  "key.chestcat.toggle_favorites_filter": "Toggle Favorites Filter"
 }

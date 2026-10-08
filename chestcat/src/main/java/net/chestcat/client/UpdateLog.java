@@ -21,6 +21,14 @@ public final class UpdateLog {
 
     /** Newest first. */
     public static final List<Entry> ENTRIES = List.of(
+            new Entry("1.3.0", "A simpler ChestCat", "October 2026", List.of(
+                    "New home screen: pick how to sort, press SORT INVENTORY, see your favorites and locked slots. That's it.",
+                    "\"More options\" now opens six small pages (Sorting, Inventory, Favorites, Appearance, Controls, Advanced) in plain language.",
+                    "Every setting has a short explanation when you hover it.",
+                    "New About & Compatibility page: your real ChestCat, Minecraft, NeoForge and Java versions, what ChestCat supports, and a Copy Diagnostics button for bug reports.",
+                    "ChestCat now warns you in chat if it is running on a version it wasn't built for.",
+                    "Clearer feedback: \"Inventory sorted\", \"Added to favorites\", \"Slot locked\", and a warning when a container can't be sorted.",
+                    "The sort-order editor now reads \"Sort by\" and \"Then by\".")),
             new Entry("1.2.0", "Smarter sorting, simpler settings", "October 2026", List.of(
                     "New sort methods: Recently Acquired, Recently Used, Most Used, Least Used, Exact Duplicates and Favorites First.",
                     "Empty slots can now go first or last, and names can sort Z-A.",
@@ -33,7 +41,8 @@ public final class UpdateLog {
                     "Profiles saved on your computer work in every world and server.",
                     "New simple settings screen with plain-language options; the old screens are under \"More settings\".",
                     "Fewer buttons: M now opens the sort list, and L, F and R are gone.",
-                    "More hotkeys, all rebindable in Controls > ChestCat.",
+                    "Better hotkeys: G sorts (Shift+G sorts your inventory from inside a chest), B sorts nearby chests, X quick-stacks. All rebindable in Controls > ChestCat, or press \"Comfortable keybinds\" in settings to auto-pick free keys.",
+                    "Hotkeys only work in your inventory and chests - never in crafting tables, furnaces or anvils, and not while the recipe book or a search box is open.",
                     "Fixed: your settings are now applied on login, so the sort key and Sort Nearby use them.")),
             new Entry("1.1.0", "The sorting overhaul", "September 2026", List.of(
                     "Multi-level sort chains, like Category > Mod > Rarity > Name.",

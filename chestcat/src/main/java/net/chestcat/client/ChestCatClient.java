@@ -49,9 +49,6 @@ public class ChestCatClient {
     public static final KeyMapping OPEN_MENU_KEY = new KeyMapping(
             "key.chestcat.open_menu", InputConstants.Type.KEYSYM, InputConstants.KEY_C, "key.categories.chestcat");
 
-    public static final KeyMapping SORT_INVENTORY_KEY = new KeyMapping(
-            "key.chestcat.sort_inventory", InputConstants.Type.KEYSYM, InputConstants.KEY_COMMA, "key.categories.chestcat");
-
     /** The action key - rebindable, fires only while ASSIGN_CATEGORY_MODIFIER_KEY is held. */
     public static final KeyMapping ASSIGN_CATEGORY_KEY = new KeyMapping(
             "key.chestcat.assign_category", InputConstants.Type.KEYSYM, InputConstants.KEY_V, "key.categories.chestcat");
@@ -117,10 +114,6 @@ public class ChestCatClient {
                 pendingMenuOpen = true;
                 PacketDistributor.sendToServer(new RequestNearbyChestsPayload(NetworkHandler.DEFAULT_RADIUS));
             }
-        }
-
-        while (SORT_INVENTORY_KEY.consumeClick()) {
-            ChestCatActions.sortInventory(inventorySortMode, false); // syncs settings first (the server forgets them on logout)
         }
 
         while (ASSIGN_CATEGORY_KEY.consumeClick()) {

@@ -185,11 +185,12 @@ public class SlotLockHandler {
     }
 
     @SubscribeEvent
-    public static void onKeyPressed(ScreenEvent.KeyPressed.Pre event) {
-        if (!supported(event.getScreen())) return;
+    public static void onKeyPressed(ScreenEvent.KeyPressed.Post event) {
+        // Post: only reached when the screen didn't use the key, so typing in a search / rename box is never stolen.
+        // Like every ChestCat hotkey, it only works in the inventory and storage containers - not crafting tables etc.
+        if (!ChestCatKeys.hotkeysAllowed(event.getScreen())) return;
         AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) event.getScreen();
         if (!ChestCatClient.FAVORITE_KEY.matches(event.getKeyCode(), event.getScanCode())) return;
-        if (screen.getFocused() instanceof EditBox box && box.isFocused()) return; // typing in a search box
 
         Slot hovered = screen.getSlotUnderMouse();
         if (hovered == null || !hovered.hasItem() || !eligible(screen, hovered)) return;
@@ -204,6 +205,8 @@ public class SlotLockHandler {
         if (menuIndex < 0) return;
         boolean nowFavorite = ClientFavorites.toggleLocal(stack);
         playFeedback(nowFavorite);
+        if (nowFavorite) ChestCatActions.actionBar("\u2605 Added to favorites", net.minecraft.ChatFormatting.GOLD);
+        else ChestCatActions.actionBar("Removed from favorites", net.minecraft.ChatFormatting.GRAY);
         PacketDistributor.sendToServer(new ToggleFavoritePayload(menuIndex));
     }
 
@@ -212,6 +215,8 @@ public class SlotLockHandler {
         else lockedMirror.add(index);
         PacketDistributor.sendToServer(new ToggleSlotLockPayload(index));
         playFeedback(lockedMirror.contains(index));
+        if (lockedMirror.contains(index)) ChestCatActions.actionBar("Slot locked - sorting won't move it", net.minecraft.ChatFormatting.AQUA);
+        else ChestCatActions.actionBar("Slot unlocked", net.minecraft.ChatFormatting.GRAY);
     }
 
     /** Locks (or unlocks) the whole row the slot is in - hotbar, or one of the three main rows. */
@@ -225,6 +230,8 @@ public class SlotLockHandler {
             PacketDistributor.sendToServer(new ToggleSlotLockPayload(i));
         }
         playFeedback(target);
+        if (target) ChestCatActions.actionBar("Row locked - sorting won't move it", net.minecraft.ChatFormatting.AQUA);
+        else ChestCatActions.actionBar("Row unlocked", net.minecraft.ChatFormatting.GRAY);
     }
 
     /** Immediate UI click: higher pitch when turning something on, lower when turning it off. */
